@@ -10,9 +10,6 @@ import {
   House,
   Minus,
   Pause,
-  PersonArmsSpread,
-  PersonSimpleHike,
-  PersonSimpleTaiChi,
   Play,
   Plus,
   Repeat,
@@ -24,6 +21,9 @@ import {
 import { applyAdjustment, generatePlan, getFailureAdvice, liftIds, type AdjustmentType } from './plan'
 import { defaultData, loadData, normalizeData, saveData, validateBackup } from './storage'
 import { LIFT_NAMES, type AppData, type LiftId, type PlanConfig, type SetResult, type TrainingSession } from './types'
+import benchIcon from './assets/bench.png'
+import deadliftIcon from './assets/deadlift.png'
+import squatIcon from './assets/squat.png'
 
 type View = 'today' | 'plan' | 'progress' | 'settings'
 
@@ -34,10 +34,10 @@ const navItems: { id: View; label: string; icon: typeof House }[] = [
   { id: 'settings', label: '设置', icon: GearSix },
 ]
 
-const liftIcons: Record<LiftId, typeof Barbell> = {
-  squat: PersonSimpleTaiChi,
-  bench: PersonArmsSpread,
-  deadlift: PersonSimpleHike,
+const liftIcons: Record<LiftId, string> = {
+  squat: squatIcon,
+  bench: benchIcon,
+  deadlift: deadliftIcon,
 }
 
 export function App() {
@@ -232,10 +232,9 @@ function TodayView({ plan, onStart }: { plan: NonNullable<AppData['plan']>; onSt
 function SessionRow({ session, onStart }: { session: TrainingSession; onStart: () => void }) {
   const failed = session.results.includes('failed')
   const completedSets = session.results.filter((result) => result === 'done').length
-  const LiftIcon = liftIcons[session.lift]
   return (
     <article className={`session-row ${session.completedAt ? 'completed' : ''}`}>
-      <div className={`lift-symbol lift-symbol-${session.lift}`} aria-hidden="true"><LiftIcon weight="bold" /></div>
+      <div className={`lift-symbol lift-symbol-${session.lift}`} aria-hidden="true"><img src={liftIcons[session.lift]} alt="" /></div>
       <div className="session-main"><span>{LIFT_NAMES[session.lift]} · {session.kind === 'main' ? '重训练' : '轻训练'}</span><strong>{session.weight} kg</strong><small>{session.sets} 组 × {session.reps} 次 · {Math.round(session.intensity * 1000) / 10}%</small></div>
       {session.completedAt ? <span className={failed ? 'status failed' : 'status success'}>{failed ? '未完成' : '已完成'}</span> : <button className="start-button" onClick={onStart}><Play weight="fill" />开始</button>}
       {!session.completedAt && completedSets > 0 && <small className="resume-note">已记录 {completedSets} 组</small>}
