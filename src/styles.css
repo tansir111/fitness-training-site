@@ -68,12 +68,10 @@ button:active { transform: scale(0.98); }
 .session-row { min-height: 108px; display: grid; grid-template-columns: 44px minmax(0,1fr) auto; align-items: center; gap: 12px; padding: 15px; border: 1px solid var(--line); border-radius: var(--radius); background: var(--surface); position: relative; }
 .session-row.completed { background: rgba(255,255,255,.58); }
 .lift-symbol { width: 44px; aspect-ratio: 1; display: grid; place-items: center; border-radius: 12px; color: var(--accent); background: var(--accent-soft); }
-.lift-symbol svg { width: 23px; height: 23px; }
+.lift-symbol img { width: 42px; height: 42px; object-fit: contain; }
 .lift-symbol-squat { background: #e3efe8; }
 .lift-symbol-bench { background: #e6eee9; }
 .lift-symbol-deadlift { background: #e0ece6; }
-.lift-symbol-squat svg { transform: translateY(1px); }
-.lift-symbol-deadlift svg { transform: scaleX(.94); }
 .session-main { display: grid; min-width: 0; }
 .session-main > span { color: var(--muted); font-size: 12px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .session-main > strong { margin: 2px 0; font-size: 22px; }
