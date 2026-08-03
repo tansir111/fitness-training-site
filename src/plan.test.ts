@@ -84,8 +84,21 @@ describe('local data migration', () => {
       version: 1,
       plan: null,
       restSeconds: { squat: 180, bench: 150, deadlift: 210 },
-    } as AppData
+    } as unknown as AppData
 
     expect(normalizeData(legacy).armBandRecords).toEqual([])
+    expect(normalizeData(legacy).pushUpRecords).toEqual([])
+  })
+
+  it('defaults legacy push-up entries to bodyweight', () => {
+    const legacy = {
+      version: 1,
+      plan: null,
+      restSeconds: { squat: 180, bench: 150, deadlift: 210 },
+      armBandRecords: [],
+      pushUpRecords: [{ id: 'old-pushup', sets: 3, reps: 10, recordedAt: '2026-08-01T08:00:00.000Z' }],
+    } as unknown as AppData
+
+    expect(normalizeData(legacy).pushUpRecords[0]).toMatchObject({ loadType: 'bodyweight', weight: 0 })
   })
 })

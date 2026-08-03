@@ -22,19 +22,19 @@ import {
 } from '@phosphor-icons/react'
 import { applyAdjustment, generatePlan, getFailureAdvice, liftIds, type AdjustmentType } from './plan'
 import { defaultData, loadData, normalizeData, saveData, validateBackup } from './storage'
-import { LIFT_NAMES, type AppData, type ArmBandDifficulty, type ArmBandRecord, type LiftId, type PlanConfig, type SetResult, type TrainingSession } from './types'
+import { LIFT_NAMES, type AppData, type ArmBandDifficulty, type ArmBandRecord, type LiftId, type PlanConfig, type PushUpLoadType, type PushUpRecord, type SetResult, type TrainingSession } from './types'
 import benchIcon from './assets/bench.png'
 import deadliftIcon from './assets/deadlift.png'
 import squatIcon from './assets/squat.png'
 import armBandImage from './assets/arm-strength-bar-ui.png'
 
-type View = 'today' | 'plan' | 'armband' | 'progress' | 'settings'
+type View = 'today' | 'plan' | 'progress' | 'other' | 'settings'
 
 const navItems: { id: View; label: string; icon: typeof House }[] = [
   { id: 'today', label: '训练', icon: House },
   { id: 'plan', label: '计划', icon: CalendarDots },
-  { id: 'armband', label: '臂力棒', icon: HandFist },
   { id: 'progress', label: '进度', icon: ChartLineUp },
+  { id: 'other', label: '其它', icon: HandFist },
   { id: 'settings', label: '设置', icon: GearSix },
 ]
 
@@ -59,10 +59,10 @@ export function App() {
   }, [toast])
 
   if (!data.plan) {
-    if (view === 'armband') {
-      return <ArmBandView records={data.armBandRecords} setData={setData} notify={setToast} standalone onBack={() => setView('today')} />
+    if (view === 'other') {
+      return <OtherView armBandRecords={data.armBandRecords} pushUpRecords={data.pushUpRecords} setData={setData} notify={setToast} standalone onBack={() => setView('today')} />
     }
-    return <PlanSetup onCreate={(config) => setData((current) => ({ ...current, plan: generatePlan(config) }))} onOpenArmband={() => setView('armband')} />
+    return <PlanSetup onCreate={(config) => setData((current) => ({ ...current, plan: generatePlan(config) }))} onOpenOther={() => setView('other')} />
   }
 
   const plan = data.plan
@@ -111,8 +111,8 @@ export function App() {
       <main className="main-content">
         {view === 'today' && <TodayView plan={plan} onStart={setActiveSessionId} />}
         {view === 'plan' && <PlanView plan={plan} onStart={setActiveSessionId} />}
-        {view === 'armband' && <ArmBandView records={data.armBandRecords} setData={setData} notify={setToast} />}
         {view === 'progress' && <ProgressView plan={plan} />}
+        {view === 'other' && <OtherView armBandRecords={data.armBandRecords} pushUpRecords={data.pushUpRecords} setData={setData} notify={setToast} />}
         {view === 'settings' && <SettingsView data={data} setData={setData} notify={setToast} />}
       </main>
 
@@ -146,7 +146,7 @@ function NavButton({ item, active, onClick }: { item: typeof navItems[number]; a
   return <button className={active ? 'nav-button active' : 'nav-button'} onClick={onClick}><Icon weight={active ? 'fill' : 'regular'} /><span>{item.label}</span></button>
 }
 
-function PlanSetup({ onCreate, onOpenArmband }: { onCreate: (config: PlanConfig) => void; onOpenArmband: () => void }) {
+function PlanSetup({ onCreate, onOpenOther }: { onCreate: (config: PlanConfig) => void; onOpenOther: () => void }) {
   const [step, setStep] = useState(1)
   const [weeks, setWeeks] = useState(9)
   const [customWeeks, setCustomWeeks] = useState(false)
@@ -197,7 +197,7 @@ function PlanSetup({ onCreate, onOpenArmband }: { onCreate: (config: PlanConfig)
             {step === 2 && <button className="secondary-button" onClick={() => setStep(1)}>返回修改</button>}
             {step === 1 ? <button className="primary-button" disabled={!valid} onClick={() => setStep(2)}>继续设置<ArrowRight /></button> : <button className="primary-button" disabled={!valid} onClick={() => onCreate({ weeks, growthRate, testAtEnd, lifts })}>生成训练计划<ArrowRight /></button>}
           </div>
-          <button className="setup-armband-link" onClick={onOpenArmband}><HandFist />先记录臂力棒</button>
+          <button className="setup-armband-link" onClick={onOpenOther}><HandFist />先记录其它训练</button>
         </section>
       </div>
     </main>
@@ -224,12 +224,37 @@ function formatArmBandDate(value: string) {
   })
 }
 
-function ArmBandView({ records, setData, notify, standalone = false, onBack }: {
-  records: ArmBandRecord[]
+type OtherTab = 'armband' | 'pushup'
+
+function OtherView({ armBandRecords, pushUpRecords, setData, notify, standalone = false, onBack }: {
+  armBandRecords: ArmBandRecord[]
+  pushUpRecords: PushUpRecord[]
   setData: React.Dispatch<React.SetStateAction<AppData>>
   notify: (message: string) => void
   standalone?: boolean
   onBack?: () => void
+}) {
+  const [tab, setTab] = useState<OtherTab>('armband')
+
+  return (
+    <div className={standalone ? 'page other-page standalone-other' : 'page other-page'}>
+      {standalone && <header className="other-standalone-header"><Brand /><button className="secondary-button" onClick={onBack}><House />返回计划</button></header>}
+      <PageHeader eyebrow="其它训练" title="其它" detail="记录臂力棒和俯卧撑，数据只保存在当前浏览器，不影响三大项周期计划。" />
+      <div className="other-tabs" role="tablist" aria-label="其它训练类型">
+        <button type="button" role="tab" aria-selected={tab === 'armband'} className={tab === 'armband' ? 'active' : ''} onClick={() => setTab('armband')}><HandFist />臂力棒</button>
+        <button type="button" role="tab" aria-selected={tab === 'pushup'} className={tab === 'pushup' ? 'active' : ''} onClick={() => setTab('pushup')}><Repeat />俯卧撑</button>
+      </div>
+      {tab === 'armband'
+        ? <ArmBandView records={armBandRecords} setData={setData} notify={notify} />
+        : <PushUpView records={pushUpRecords} setData={setData} notify={notify} />}
+    </div>
+  )
+}
+
+function ArmBandView({ records, setData, notify }: {
+  records: ArmBandRecord[]
+  setData: React.Dispatch<React.SetStateAction<AppData>>
+  notify: (message: string) => void
 }) {
   const [difficulty, setDifficulty] = useState<ArmBandDifficulty>('normal')
   const [resistance, setResistance] = useState(10)
@@ -290,9 +315,6 @@ function ArmBandView({ records, setData, notify, standalone = false, onBack }: {
   }
 
   return (
-    <div className={standalone ? 'armband-page standalone-armband' : 'page armband-page'}>
-      {standalone && <header className="armband-standalone-header"><Brand /><button className="secondary-button" onClick={onBack}><House />返回计划</button></header>}
-      <PageHeader eyebrow="独立记录" title="臂力棒" detail="随时记录你的阻力、组数和次数，数据只保存在当前浏览器。" />
       <div className="armband-layout">
         <section className="armband-form-panel">
           <div className="armband-image-placeholder"><img src={armBandImage} alt="臂力棒" /></div>
@@ -334,6 +356,113 @@ function ArmBandView({ records, setData, notify, standalone = false, onBack }: {
           ))}</div> : <div className="armband-empty"><HandFist /><strong>还没有臂力棒记录</strong><span>完成一次训练后，记录会显示在这里。</span></div>}
         </section>
       </div>
+  )
+}
+
+function PushUpView({ records, setData, notify }: {
+  records: PushUpRecord[]
+  setData: React.Dispatch<React.SetStateAction<AppData>>
+  notify: (message: string) => void
+}) {
+  const [loadType, setLoadType] = useState<PushUpLoadType>('bodyweight')
+  const [weight, setWeight] = useState(10)
+  const [sets, setSets] = useState(3)
+  const [reps, setReps] = useState(10)
+  const [editingId, setEditingId] = useState<string | null>(null)
+  const orderedRecords = [...records].sort((a, b) => new Date(b.recordedAt).getTime() - new Date(a.recordedAt).getTime())
+  const weekStart = getWeekStart()
+  const weekRecords = orderedRecords.filter((record) => new Date(record.recordedAt) >= weekStart)
+  const totalSets = records.reduce((sum, record) => sum + record.sets, 0)
+  const totalReps = records.reduce((sum, record) => sum + record.sets * record.reps, 0)
+
+  const resetForm = () => {
+    setLoadType('bodyweight')
+    setWeight(10)
+    setSets(3)
+    setReps(10)
+    setEditingId(null)
+  }
+
+  const saveRecord = () => {
+    if (!Number.isFinite(sets) || !Number.isFinite(reps) || sets < 1 || reps < 1 || (loadType === 'weighted' && (!Number.isFinite(weight) || weight <= 0))) {
+      notify('请填写有效的负重、组数和次数。')
+      return
+    }
+    const nextRecord: PushUpRecord = {
+      id: editingId ?? `pushup-${Date.now()}`,
+      loadType,
+      weight: loadType === 'weighted' ? Math.round(weight * 2) / 2 : 0,
+      sets: Math.round(sets),
+      reps: Math.round(reps),
+      recordedAt: editingId ? records.find((record) => record.id === editingId)?.recordedAt ?? new Date().toISOString() : new Date().toISOString(),
+    }
+    setData((current) => ({
+      ...current,
+      pushUpRecords: editingId
+        ? current.pushUpRecords.map((record) => record.id === editingId ? nextRecord : record)
+        : [nextRecord, ...current.pushUpRecords],
+    }))
+    notify(editingId ? '俯卧撑记录已修改。' : '俯卧撑记录已保存。')
+    resetForm()
+  }
+
+  const editRecord = (record: PushUpRecord) => {
+    setLoadType(record.loadType)
+    setWeight(record.weight > 0 ? record.weight : 10)
+    setSets(record.sets)
+    setReps(record.reps)
+    setEditingId(record.id)
+    window.scrollTo({ top: 0, behavior: 'smooth' })
+  }
+
+  const deleteRecord = (id: string) => {
+    if (!window.confirm('确定删除这条俯卧撑记录吗？')) return
+    setData((current) => ({ ...current, pushUpRecords: current.pushUpRecords.filter((record) => record.id !== id) }))
+    if (editingId === id) resetForm()
+    notify('俯卧撑记录已删除。')
+  }
+
+  return (
+    <div className="armband-layout pushup-layout">
+      <section className="armband-form-panel pushup-form-panel">
+        <div className="section-heading"><h2>{editingId ? '修改记录' : '记录一次训练'}</h2><span>每次填写一条</span></div>
+        <div className="pushup-note"><Repeat /><span>记录标准俯卧撑的完成组数和每组次数。</span></div>
+        <fieldset className="armband-fieldset pushup-load-fieldset">
+          <legend>负重方式</legend>
+          <div className="difficulty-switch pushup-load-switch" role="group" aria-label="俯卧撑负重方式">
+            <button type="button" className={loadType === 'bodyweight' ? 'selected' : ''} onClick={() => setLoadType('bodyweight')}>自重</button>
+            <button type="button" className={loadType === 'weighted' ? 'selected' : ''} onClick={() => setLoadType('weighted')}>负重</button>
+          </div>
+          {loadType === 'weighted' && <label className="pushup-weight-input"><span>负重</span><div className="pushup-weight-control"><input type="number" min="0.5" max="200" step="0.5" value={weight} onChange={(event) => setWeight(Number(event.target.value))} /><span>kg</span></div></label>}
+        </fieldset>
+        <div className="armband-input-grid pushup-input-grid">
+          <label><span>组数</span><input type="number" min="1" max="99" step="1" value={sets} onChange={(event) => setSets(Number(event.target.value))} /></label>
+          <label><span>每组次数</span><input type="number" min="1" max="999" step="1" value={reps} onChange={(event) => setReps(Number(event.target.value))} /></label>
+        </div>
+        <div className="armband-form-actions">
+          {editingId && <button className="secondary-button" onClick={resetForm}>取消修改</button>}
+          <button className="primary-button" onClick={saveRecord}><Check weight="bold" />{editingId ? '保存修改' : '保存记录'}</button>
+        </div>
+      </section>
+
+      <section className="armband-stats-section">
+        <div className="section-heading"><h2>训练统计</h2><span>自动汇总</span></div>
+        <div className="armband-stats">
+          <div className="armband-stat-primary"><span>本周训练</span><strong>{weekRecords.length}</strong><small>次记录</small></div>
+          <div><span>累计组数</span><strong>{totalSets}</strong><small>组</small></div>
+          <div><span>累计次数</span><strong>{totalReps}</strong><small>次</small></div>
+        </div>
+      </section>
+
+      <section className="armband-history-section">
+        <div className="section-heading"><h2>历史记录</h2><span>{orderedRecords.length} 条</span></div>
+        {orderedRecords.length ? <div className="armband-history-list">{orderedRecords.map((record) => (
+          <article className="armband-record" key={record.id}>
+            <div className="armband-record-main"><div><strong>{record.loadType === 'weighted' ? `负重 ${record.weight} kg` : '自重'} 俯卧撑</strong><small>{record.sets} 组 × {record.reps} 次 · 共 {record.sets * record.reps} 次</small></div><time>{formatArmBandDate(record.recordedAt)}</time></div>
+            <div className="armband-record-actions"><button title="编辑记录" aria-label="编辑记录" onClick={() => editRecord(record)}><PencilSimple /></button><button title="删除记录" aria-label="删除记录" onClick={() => deleteRecord(record.id)}><Trash /></button></div>
+          </article>
+        ))}</div> : <div className="armband-empty"><Repeat /><strong>还没有俯卧撑记录</strong><span>完成一次训练后，记录会显示在这里。</span></div>}
+      </section>
     </div>
   )
 }
