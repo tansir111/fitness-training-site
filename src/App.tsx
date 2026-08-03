@@ -26,6 +26,7 @@ import { LIFT_NAMES, type AppData, type ArmBandDifficulty, type ArmBandRecord, t
 import benchIcon from './assets/bench.png'
 import deadliftIcon from './assets/deadlift.png'
 import squatIcon from './assets/squat.png'
+import armBandImage from './assets/arm-strength-bar-ui.png'
 
 type View = 'today' | 'plan' | 'armband' | 'progress' | 'settings'
 
@@ -294,7 +295,7 @@ function ArmBandView({ records, setData, notify, standalone = false, onBack }: {
       <PageHeader eyebrow="独立记录" title="臂力棒" detail="随时记录你的阻力、组数和次数，数据只保存在当前浏览器。" />
       <div className="armband-layout">
         <section className="armband-form-panel">
-          <div className="armband-image-placeholder" role="img" aria-label="臂力棒图片占位区域"><span>图片占位</span></div>
+          <div className="armband-image-placeholder"><img src={armBandImage} alt="臂力棒" /></div>
           <div className="section-heading"><h2>{editingId ? '修改记录' : '记录一次训练'}</h2><span>每次填写一条</span></div>
           <fieldset className="armband-fieldset">
             <legend>阻力类型</legend>
