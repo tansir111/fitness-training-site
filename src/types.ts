@@ -1,6 +1,7 @@
 export type LiftId = 'squat' | 'bench' | 'deadlift'
 export type SessionKind = 'main' | 'light'
 export type SetResult = 'pending' | 'done' | 'failed'
+export type ArmBandDifficulty = 'normal' | 'extreme'
 
 export interface LiftConfig {
   oneRm: number
@@ -36,10 +37,20 @@ export interface TrainingPlan {
   sessions: TrainingSession[]
 }
 
+export interface ArmBandRecord {
+  id: string
+  difficulty: ArmBandDifficulty
+  resistance: number
+  sets: number
+  reps: number
+  recordedAt: string
+}
+
 export interface AppData {
   version: 1
   plan: TrainingPlan | null
   restSeconds: Record<LiftId, number>
+  armBandRecords: ArmBandRecord[]
 }
 
 export const LIFT_NAMES: Record<LiftId, string> = {

@@ -7,9 +7,11 @@ import {
   Check,
   DownloadSimple,
   GearSix,
+  HandFist,
   House,
   Minus,
   Pause,
+  PencilSimple,
   Play,
   Plus,
   Repeat,
@@ -20,16 +22,17 @@ import {
 } from '@phosphor-icons/react'
 import { applyAdjustment, generatePlan, getFailureAdvice, liftIds, type AdjustmentType } from './plan'
 import { defaultData, loadData, normalizeData, saveData, validateBackup } from './storage'
-import { LIFT_NAMES, type AppData, type LiftId, type PlanConfig, type SetResult, type TrainingSession } from './types'
+import { LIFT_NAMES, type AppData, type ArmBandDifficulty, type ArmBandRecord, type LiftId, type PlanConfig, type SetResult, type TrainingSession } from './types'
 import benchIcon from './assets/bench.png'
 import deadliftIcon from './assets/deadlift.png'
 import squatIcon from './assets/squat.png'
 
-type View = 'today' | 'plan' | 'progress' | 'settings'
+type View = 'today' | 'plan' | 'armband' | 'progress' | 'settings'
 
 const navItems: { id: View; label: string; icon: typeof House }[] = [
   { id: 'today', label: '训练', icon: House },
   { id: 'plan', label: '计划', icon: CalendarDots },
+  { id: 'armband', label: '臂力棒', icon: HandFist },
   { id: 'progress', label: '进度', icon: ChartLineUp },
   { id: 'settings', label: '设置', icon: GearSix },
 ]
@@ -55,7 +58,10 @@ export function App() {
   }, [toast])
 
   if (!data.plan) {
-    return <PlanSetup onCreate={(config) => setData((current) => ({ ...current, plan: generatePlan(config) }))} />
+    if (view === 'armband') {
+      return <ArmBandView records={data.armBandRecords} setData={setData} notify={setToast} standalone onBack={() => setView('today')} />
+    }
+    return <PlanSetup onCreate={(config) => setData((current) => ({ ...current, plan: generatePlan(config) }))} onOpenArmband={() => setView('armband')} />
   }
 
   const plan = data.plan
@@ -104,6 +110,7 @@ export function App() {
       <main className="main-content">
         {view === 'today' && <TodayView plan={plan} onStart={setActiveSessionId} />}
         {view === 'plan' && <PlanView plan={plan} onStart={setActiveSessionId} />}
+        {view === 'armband' && <ArmBandView records={data.armBandRecords} setData={setData} notify={setToast} />}
         {view === 'progress' && <ProgressView plan={plan} />}
         {view === 'settings' && <SettingsView data={data} setData={setData} notify={setToast} />}
       </main>
@@ -138,7 +145,7 @@ function NavButton({ item, active, onClick }: { item: typeof navItems[number]; a
   return <button className={active ? 'nav-button active' : 'nav-button'} onClick={onClick}><Icon weight={active ? 'fill' : 'regular'} /><span>{item.label}</span></button>
 }
 
-function PlanSetup({ onCreate }: { onCreate: (config: PlanConfig) => void }) {
+function PlanSetup({ onCreate, onOpenArmband }: { onCreate: (config: PlanConfig) => void; onOpenArmband: () => void }) {
   const [step, setStep] = useState(1)
   const [weeks, setWeeks] = useState(9)
   const [customWeeks, setCustomWeeks] = useState(false)
@@ -189,9 +196,144 @@ function PlanSetup({ onCreate }: { onCreate: (config: PlanConfig) => void }) {
             {step === 2 && <button className="secondary-button" onClick={() => setStep(1)}>返回修改</button>}
             {step === 1 ? <button className="primary-button" disabled={!valid} onClick={() => setStep(2)}>继续设置<ArrowRight /></button> : <button className="primary-button" disabled={!valid} onClick={() => onCreate({ weeks, growthRate, testAtEnd, lifts })}>生成训练计划<ArrowRight /></button>}
           </div>
+          <button className="setup-armband-link" onClick={onOpenArmband}><HandFist />先记录臂力棒</button>
         </section>
       </div>
     </main>
+  )
+}
+
+const ARM_BAND_RESISTANCES = Array.from({ length: 10 }, (_, index) => (index + 1) * 10)
+
+function getWeekStart(date = new Date()) {
+  const start = new Date(date)
+  const day = start.getDay()
+  const offset = day === 0 ? -6 : 1 - day
+  start.setDate(start.getDate() + offset)
+  start.setHours(0, 0, 0, 0)
+  return start
+}
+
+function formatArmBandDate(value: string) {
+  return new Date(value).toLocaleString('zh-CN', {
+    month: 'numeric',
+    day: 'numeric',
+    hour: '2-digit',
+    minute: '2-digit',
+  })
+}
+
+function ArmBandView({ records, setData, notify, standalone = false, onBack }: {
+  records: ArmBandRecord[]
+  setData: React.Dispatch<React.SetStateAction<AppData>>
+  notify: (message: string) => void
+  standalone?: boolean
+  onBack?: () => void
+}) {
+  const [difficulty, setDifficulty] = useState<ArmBandDifficulty>('normal')
+  const [resistance, setResistance] = useState(10)
+  const [sets, setSets] = useState(3)
+  const [reps, setReps] = useState(10)
+  const [editingId, setEditingId] = useState<string | null>(null)
+  const orderedRecords = [...records].sort((a, b) => new Date(b.recordedAt).getTime() - new Date(a.recordedAt).getTime())
+  const weekStart = getWeekStart()
+  const weekRecords = orderedRecords.filter((record) => new Date(record.recordedAt) >= weekStart)
+  const totalSets = records.reduce((sum, record) => sum + record.sets, 0)
+  const totalReps = records.reduce((sum, record) => sum + record.sets * record.reps, 0)
+
+  const resetForm = () => {
+    setDifficulty('normal')
+    setResistance(10)
+    setSets(3)
+    setReps(10)
+    setEditingId(null)
+  }
+
+  const saveRecord = () => {
+    if (!ARM_BAND_RESISTANCES.includes(resistance) || !Number.isFinite(sets) || !Number.isFinite(reps) || sets < 1 || reps < 1) {
+      notify('请填写有效的阻力、组数和次数。')
+      return
+    }
+    const nextRecord: ArmBandRecord = {
+      id: editingId ?? `armband-${Date.now()}`,
+      difficulty,
+      resistance,
+      sets: Math.round(sets),
+      reps: Math.round(reps),
+      recordedAt: editingId ? records.find((record) => record.id === editingId)?.recordedAt ?? new Date().toISOString() : new Date().toISOString(),
+    }
+    setData((current) => ({
+      ...current,
+      armBandRecords: editingId
+        ? current.armBandRecords.map((record) => record.id === editingId ? nextRecord : record)
+        : [nextRecord, ...current.armBandRecords],
+    }))
+    notify(editingId ? '臂力棒记录已修改。' : '臂力棒记录已保存。')
+    resetForm()
+  }
+
+  const editRecord = (record: ArmBandRecord) => {
+    setDifficulty(record.difficulty)
+    setResistance(record.resistance)
+    setSets(record.sets)
+    setReps(record.reps)
+    setEditingId(record.id)
+    window.scrollTo({ top: 0, behavior: 'smooth' })
+  }
+
+  const deleteRecord = (id: string) => {
+    if (!window.confirm('确定删除这条臂力棒记录吗？')) return
+    setData((current) => ({ ...current, armBandRecords: current.armBandRecords.filter((record) => record.id !== id) }))
+    if (editingId === id) resetForm()
+    notify('臂力棒记录已删除。')
+  }
+
+  return (
+    <div className={standalone ? 'armband-page standalone-armband' : 'page armband-page'}>
+      {standalone && <header className="armband-standalone-header"><Brand /><button className="secondary-button" onClick={onBack}><House />返回计划</button></header>}
+      <PageHeader eyebrow="独立记录" title="臂力棒" detail="随时记录你的阻力、组数和次数，数据只保存在当前浏览器。" />
+      <div className="armband-layout">
+        <section className="armband-form-panel">
+          <div className="armband-image-placeholder" role="img" aria-label="臂力棒图片占位区域"><span>图片占位</span></div>
+          <div className="section-heading"><h2>{editingId ? '修改记录' : '记录一次训练'}</h2><span>每次填写一条</span></div>
+          <fieldset className="armband-fieldset">
+            <legend>阻力类型</legend>
+            <div className="difficulty-switch" role="group" aria-label="阻力类型">
+              <button type="button" className={difficulty === 'normal' ? 'selected' : ''} onClick={() => setDifficulty('normal')}>普通</button>
+              <button type="button" className={difficulty === 'extreme' ? 'selected extreme' : ''} onClick={() => setDifficulty('extreme')}>极难</button>
+            </div>
+          </fieldset>
+          <div className="armband-input-grid">
+            <label><span>具体阻力</span><select value={resistance} onChange={(event) => setResistance(Number(event.target.value))}>{ARM_BAND_RESISTANCES.map((value) => <option value={value} key={value}>{value} kg</option>)}</select></label>
+            <label><span>组数</span><input type="number" min="1" max="99" step="1" value={sets} onChange={(event) => setSets(Number(event.target.value))} /></label>
+            <label><span>每组次数</span><input type="number" min="1" max="999" step="1" value={reps} onChange={(event) => setReps(Number(event.target.value))} /></label>
+          </div>
+          <div className="armband-form-actions">
+            {editingId && <button className="secondary-button" onClick={resetForm}>取消修改</button>}
+            <button className="primary-button" onClick={saveRecord}><Check weight="bold" />{editingId ? '保存修改' : '保存记录'}</button>
+          </div>
+        </section>
+
+        <section className="armband-stats-section">
+          <div className="section-heading"><h2>训练统计</h2><span>自动汇总</span></div>
+          <div className="armband-stats">
+            <div className="armband-stat-primary"><span>本周训练</span><strong>{weekRecords.length}</strong><small>次记录</small></div>
+            <div><span>累计组数</span><strong>{totalSets}</strong><small>组</small></div>
+            <div><span>累计次数</span><strong>{totalReps}</strong><small>次</small></div>
+          </div>
+        </section>
+
+        <section className="armband-history-section">
+          <div className="section-heading"><h2>历史记录</h2><span>{orderedRecords.length} 条</span></div>
+          {orderedRecords.length ? <div className="armband-history-list">{orderedRecords.map((record) => (
+            <article className="armband-record" key={record.id}>
+              <div className="armband-record-main"><div><strong>{record.difficulty === 'extreme' ? '极难' : '普通'} · {record.resistance} kg</strong><small>{record.sets} 组 × {record.reps} 次 · 共 {record.sets * record.reps} 次</small></div><time>{formatArmBandDate(record.recordedAt)}</time></div>
+              <div className="armband-record-actions"><button title="编辑记录" aria-label="编辑记录" onClick={() => editRecord(record)}><PencilSimple /></button><button title="删除记录" aria-label="删除记录" onClick={() => deleteRecord(record.id)}><Trash /></button></div>
+            </article>
+          ))}</div> : <div className="armband-empty"><HandFist /><strong>还没有臂力棒记录</strong><span>完成一次训练后，记录会显示在这里。</span></div>}
+        </section>
+      </div>
+    </div>
   )
 }
 
