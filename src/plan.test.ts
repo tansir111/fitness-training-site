@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import { applyAdjustment, generatePlan, roundToPlate } from './plan'
-import { normalizePlan } from './storage'
-import type { PlanConfig } from './types'
+import { normalizeData, normalizePlan } from './storage'
+import type { AppData, PlanConfig } from './types'
 
 const config: PlanConfig = {
   weeks: 9,
@@ -75,5 +75,30 @@ describe('plan generation', () => {
     expect(adjusted.sessions.find((session) => session.id === '3-squat-main')?.weight).toBe(failed.weight)
     expect(adjusted.sessions.find((session) => session.id === '4-squat-main')?.weight)
       .toBe(plan.sessions.find((session) => session.id === '4-squat-main')?.weight)
+  })
+})
+
+describe('local data migration', () => {
+  it('adds an empty arm-band history to legacy data', () => {
+    const legacy = {
+      version: 1,
+      plan: null,
+      restSeconds: { squat: 180, bench: 150, deadlift: 210 },
+    } as unknown as AppData
+
+    expect(normalizeData(legacy).armBandRecords).toEqual([])
+    expect(normalizeData(legacy).pushUpRecords).toEqual([])
+  })
+
+  it('defaults legacy push-up entries to bodyweight', () => {
+    const legacy = {
+      version: 1,
+      plan: null,
+      restSeconds: { squat: 180, bench: 150, deadlift: 210 },
+      armBandRecords: [],
+      pushUpRecords: [{ id: 'old-pushup', sets: 3, reps: 10, recordedAt: '2026-08-01T08:00:00.000Z' }],
+    } as unknown as AppData
+
+    expect(normalizeData(legacy).pushUpRecords[0]).toMatchObject({ loadType: 'bodyweight', weight: 0 })
   })
 })

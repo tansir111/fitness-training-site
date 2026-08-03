@@ -38,7 +38,7 @@ button:active { transform: scale(0.98); }
 .brand strong { font-size: 19px; letter-spacing: 0; }
 .brand small { color: var(--muted); font-size: 11px; }
 
-.bottom-nav { position: fixed; z-index: 30; left: 0; right: 0; bottom: 0; display: grid; grid-template-columns: repeat(4, 1fr); padding: 8px 8px calc(8px + env(safe-area-inset-bottom)); border-top: 1px solid rgba(220, 227, 221, 0.9); background: rgba(255,255,255,0.96); }
+.bottom-nav { position: fixed; z-index: 30; left: 0; right: 0; bottom: 0; display: grid; grid-template-columns: repeat(5, 1fr); padding: 8px 8px calc(8px + env(safe-area-inset-bottom)); border-top: 1px solid rgba(220, 227, 221, 0.9); background: rgba(255,255,255,0.96); }
 .nav-button { min-height: 54px; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 3px; border: 0; border-radius: 12px; color: #768078; background: transparent; cursor: pointer; }
 .nav-button svg { width: 22px; height: 22px; }
 .nav-button span { font-size: 11px; }
@@ -89,6 +89,64 @@ button:active { transform: scale(0.98); }
 .targets-strip span { display: grid; gap: 4px; }
 .targets-strip small { color: var(--muted); font-size: 11px; }
 .targets-strip strong { font-size: 16px; }
+
+.armband-page { padding-bottom: 48px; }
+.other-page { padding-bottom: 48px; }
+.other-tabs { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; margin-bottom: 24px; }
+.other-tabs button { min-height: 46px; display: inline-flex; align-items: center; justify-content: center; gap: 7px; border: 1px solid var(--line); border-radius: 11px; color: var(--muted); background: var(--surface); cursor: pointer; font-size: 13px; font-weight: 600; }
+.other-tabs button.active { color: #fff; border-color: var(--accent); background: var(--accent); }
+.other-tabs button svg { width: 18px; height: 18px; }
+.armband-layout { display: grid; gap: 28px; }
+.armband-form-panel { padding: 18px; border: 1px solid var(--line); border-radius: var(--radius); background: var(--surface); box-shadow: var(--shadow); }
+.armband-image-placeholder { overflow: hidden; margin-bottom: 24px; border: 1px solid #dce3dd; border-radius: 13px; background: #fff; }
+.armband-image-placeholder img { width: 100%; height: auto; display: block; }
+.armband-fieldset { margin: 0; padding: 15px; border: 1px solid var(--line); border-radius: 12px; background: #fbfcfb; }
+.armband-fieldset legend { font-size: 13px; }
+.difficulty-switch { display: grid; grid-template-columns: repeat(2, 1fr); gap: 7px; }
+.difficulty-switch button { min-height: 44px; border: 1px solid var(--line); border-radius: 10px; color: var(--muted); background: var(--surface); cursor: pointer; font-size: 13px; }
+.difficulty-switch button.selected { color: var(--accent-strong); border-color: #86a594; background: var(--accent-soft); font-weight: 700; }
+.difficulty-switch button.selected.extreme { color: #7d4038; border-color: #cf968b; background: var(--danger-soft); }
+.armband-input-grid { display: grid; grid-template-columns: 1.2fr .8fr .9fr; gap: 9px; margin-top: 12px; }
+.armband-input-grid label { display: grid; gap: 6px; color: var(--muted); font-size: 11px; }
+.armband-input-grid input, .armband-input-grid select { width: 100%; height: 44px; padding: 0 10px; border: 1px solid var(--line); border-radius: 10px; color: var(--accent-strong); background: #f8faf8; font-size: 14px; font-weight: 700; }
+.pushup-input-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+.pushup-note { display: flex; align-items: center; gap: 8px; margin: 0 0 15px; padding: 11px 12px; border-radius: 10px; color: var(--accent-strong); background: var(--accent-soft); font-size: 12px; line-height: 1.45; }
+.pushup-note svg { flex: 0 0 auto; width: 19px; height: 19px; }
+.pushup-load-fieldset { margin-bottom: 12px; }
+.pushup-weight-input { display: grid; gap: 6px; margin-top: 12px; color: var(--muted); font-size: 11px; }
+.pushup-weight-control { display: flex; align-items: center; gap: 8px; }
+.pushup-weight-control input { width: 100%; height: 44px; padding: 0 10px; border: 1px solid var(--line); border-radius: 10px; color: var(--accent-strong); background: #f8faf8; font-size: 14px; font-weight: 700; }
+.pushup-weight-control span { color: var(--muted); font-size: 12px; }
+.armband-form-actions { display: flex; justify-content: flex-end; gap: 8px; margin-top: 16px; }
+.armband-form-actions .primary-button, .armband-form-actions .secondary-button { min-height: 44px; padding: 0 15px; }
+.armband-stats-section, .armband-history-section { min-width: 0; }
+.armband-stats { display: grid; grid-template-columns: repeat(3, 1fr); gap: 9px; }
+.armband-stats > div { min-height: 116px; display: flex; flex-direction: column; justify-content: center; padding: 15px; border: 1px solid var(--line); border-radius: var(--radius); background: var(--surface); }
+.armband-stats span, .armband-stats small { color: var(--muted); font-size: 11px; }
+.armband-stats strong { margin: 5px 0 1px; font-size: 30px; }
+.armband-stats .armband-stat-primary { color: #fff; border-color: var(--accent-strong); background: var(--accent-strong); }
+.armband-stats .armband-stat-primary span, .armband-stats .armband-stat-primary small { color: rgba(255,255,255,.72); }
+.armband-history-list { display: grid; gap: 8px; }
+.armband-record { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: center; gap: 10px; min-height: 78px; padding: 12px 14px; border: 1px solid var(--line); border-radius: 12px; background: var(--surface); }
+.armband-record-main { display: grid; gap: 3px; min-width: 0; }
+.armband-record-main > div { display: grid; gap: 3px; min-width: 0; }
+.armband-record-main strong { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 14px; }
+.armband-record-main small, .armband-record-main time { color: var(--muted); font-size: 11px; }
+.armband-record-main time { white-space: nowrap; }
+.armband-record-actions { display: flex; gap: 6px; }
+.armband-record-actions button { width: 36px; aspect-ratio: 1; display: grid; place-items: center; border: 1px solid var(--line); border-radius: 9px; color: var(--muted); background: #f8faf8; cursor: pointer; }
+.armband-record-actions button:last-child { color: var(--danger); border-color: #e3c0b9; background: var(--danger-soft); }
+.armband-record-actions svg { width: 17px; }
+.armband-empty { min-height: 150px; display: grid; place-items: center; align-content: center; gap: 7px; padding: 22px; border: 1px dashed #cbd5cd; border-radius: var(--radius); color: var(--muted); text-align: center; background: rgba(255,255,255,.55); }
+.armband-empty svg { width: 30px; height: 30px; color: var(--accent); }
+.armband-empty strong { color: var(--accent-strong); font-size: 14px; }
+.armband-empty span { font-size: 11px; }
+.standalone-other { width: min(100%, 960px); margin: 0 auto; padding: 20px 18px 48px; }
+.other-standalone-header { display: flex; align-items: center; justify-content: space-between; margin-bottom: 46px; }
+.other-standalone-header .secondary-button { min-height: 42px; padding: 0 13px; }
+.other-standalone-header .secondary-button svg { width: 17px; }
+.setup-armband-link { display: inline-flex; align-items: center; gap: 6px; width: 100%; justify-content: center; height: 44px; margin-top: 8px; border: 0; color: var(--muted); background: transparent; cursor: pointer; font-size: 12px; }
+.setup-armband-link svg { width: 17px; }
 
 .week-tabs { display: flex; gap: 7px; margin: 0 -18px 22px; padding: 0 18px 5px; overflow-x: auto; scrollbar-width: none; }
 .week-tabs::-webkit-scrollbar { display: none; }
@@ -251,6 +309,9 @@ input[type="range"] { width: 100%; accent-color: var(--accent); }
 .toast { position: fixed; z-index: 100; left: 50%; bottom: calc(88px + env(safe-area-inset-bottom)); transform: translateX(-50%); width: max-content; max-width: calc(100% - 36px); padding: 11px 15px; border-radius: 10px; color: #fff; background: #253d31; box-shadow: 0 12px 30px rgba(37,61,49,.22); font-size: 12px; }
 
 @media (min-width: 760px) {
+  .armband-layout { grid-template-columns: minmax(0, 1fr) minmax(280px, .72fr); align-items: start; }
+  .armband-form-panel { grid-row: span 1; }
+  .armband-history-section { grid-column: 1 / -1; }
   .app-shell { display: grid; grid-template-columns: 230px 1fr; }
   .sidebar { position: sticky; top: 0; height: 100dvh; display: flex; flex-direction: column; padding: 28px 20px; border-right: 1px solid var(--line); background: rgba(255,255,255,.62); }
   .sidebar nav { display: grid; gap: 6px; margin-top: 48px; }

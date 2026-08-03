@@ -6,6 +6,8 @@ export const defaultData: AppData = {
   version: 1,
   plan: null,
   restSeconds: { squat: 180, bench: 150, deadlift: 210 },
+  armBandRecords: [],
+  pushUpRecords: [],
 }
 
 export function loadData(): AppData {
@@ -32,7 +34,16 @@ export function normalizePlan(plan: TrainingPlan): TrainingPlan {
 }
 
 export function normalizeData(data: AppData): AppData {
-  return data.plan ? { ...data, plan: normalizePlan(data.plan) } : data
+  return {
+    ...data,
+    armBandRecords: Array.isArray(data.armBandRecords) ? data.armBandRecords : [],
+    pushUpRecords: Array.isArray(data.pushUpRecords) ? data.pushUpRecords.map((record) => ({
+      ...record,
+      loadType: record.loadType === 'weighted' ? 'weighted' : 'bodyweight',
+      weight: Number.isFinite(record.weight) ? record.weight : 0,
+    })) : [],
+    ...(data.plan ? { plan: normalizePlan(data.plan) } : {}),
+  }
 }
 
 export function saveData(data: AppData) {
