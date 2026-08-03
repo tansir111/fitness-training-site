@@ -1,11 +1,12 @@
-import type { AppData, TrainingPlan } from './types'
+import { getLiftDays, liftIds, normalizePlanConfig, roundToPlate } from './plan'
+import type { AppData, LiftId, TrainingPlan } from './types'
 
 const STORAGE_KEY = 'strength-cycle-data-v1'
 
 export const defaultData: AppData = {
   version: 1,
   plan: null,
-  restSeconds: { squat: 180, bench: 150, deadlift: 210 },
+  restSeconds: { squat: 180, bench: 150, deadlift: 210, curl: 90, press: 150 },
   armBandRecords: [],
   pushUpRecords: [],
 }
@@ -21,14 +22,30 @@ export function loadData(): AppData {
   }
 }
 
-const sessionOrder = ['bench-main', 'deadlift-light', 'squat-main', 'bench-light', 'deadlift-main', 'squat-light']
+const sessionOrder = ['bench-main', 'deadlift-light', 'squat-main', 'bench-light', 'deadlift-main', 'squat-light', 'press-main', 'curl-main', 'press-light', 'curl-light']
 
 export function normalizePlan(plan: TrainingPlan): TrainingPlan {
+  const config = normalizePlanConfig(plan.config)
+  const targets = { ...plan.targets } as Record<LiftId, number>
+  for (const lift of liftIds) {
+    if (!Number.isFinite(targets[lift])) {
+      targets[lift] = roundToPlate(config.lifts[lift].oneRm * (1 + config.growthRate))
+    }
+  }
+
   return {
     ...plan,
-    sessions: [...plan.sessions].sort((a, b) => {
+    config,
+    targets,
+    sessions: plan.sessions.map((session) => ({
+      ...session,
+      results: Array.from({ length: session.sets }, (_, index) => session.results?.[index] ?? 'pending'),
+      day: session.day ?? getLiftDays(config, session.lift)[session.kind === 'main' ? 0 : 1] ?? getLiftDays(config, session.lift)[0],
+    })).sort((a, b) => {
       if (a.week !== b.week) return a.week - b.week
-      return sessionOrder.indexOf(`${a.lift}-${a.kind}`) - sessionOrder.indexOf(`${b.lift}-${b.kind}`)
+      const aOrder = sessionOrder.indexOf(`${a.lift}-${a.kind}`)
+      const bOrder = sessionOrder.indexOf(`${b.lift}-${b.kind}`)
+      return (aOrder < 0 ? sessionOrder.length : aOrder) - (bOrder < 0 ? sessionOrder.length : bOrder)
     }),
   }
 }
@@ -36,6 +53,7 @@ export function normalizePlan(plan: TrainingPlan): TrainingPlan {
 export function normalizeData(data: AppData): AppData {
   return {
     ...data,
+    restSeconds: { ...defaultData.restSeconds, ...(data.restSeconds ?? {}) },
     armBandRecords: Array.isArray(data.armBandRecords) ? data.armBandRecords : [],
     pushUpRecords: Array.isArray(data.pushUpRecords) ? data.pushUpRecords.map((record) => ({
       ...record,

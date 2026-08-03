@@ -5,6 +5,7 @@ import {
   CalendarDots,
   ChartLineUp,
   Check,
+  CopySimple,
   DownloadSimple,
   GearSix,
   HandFist,
@@ -18,17 +19,25 @@ import {
   Timer as TimerIcon,
   Trash,
   UploadSimple,
+  WechatLogo,
   X,
 } from '@phosphor-icons/react'
-import { applyAdjustment, generatePlan, getFailureAdvice, liftIds, type AdjustmentType } from './plan'
+import { applyAdjustment, flexibleLiftIds, generatePlan, getDefaultLiftDays, getFailureAdvice, getLiftDays, liftIds, setFlexibleLiftEnabled, type AdjustmentType } from './plan'
 import { defaultData, loadData, normalizeData, saveData, validateBackup } from './storage'
-import { LIFT_NAMES, type AppData, type ArmBandDifficulty, type ArmBandRecord, type LiftId, type PlanConfig, type PushUpLoadType, type PushUpRecord, type SetResult, type TrainingSession } from './types'
-import benchIcon from './assets/bench.png'
-import deadliftIcon from './assets/deadlift.png'
-import squatIcon from './assets/squat.png'
-import armBandImage from './assets/arm-strength-bar-ui.png'
+import { LIFT_NAMES, type AppData, type ArmBandDifficulty, type ArmBandRecord, type LiftId, type PlanConfig, type PushUpLoadType, type PushUpRecord, type SetResult, type TrainingSession, type Weekday } from './types'
+import benchIcon from './assets/bench-v3.png'
+import deadliftIcon from './assets/deadlift-v3.png'
+import squatIcon from './assets/squat-v3.png'
+import curlIcon from './assets/curl-v3.png'
+import pressIcon from './assets/press-v3.png'
+import armBandTabIcon from './assets/armband-tab-icon.png'
+import pushUpTabIcon from './assets/pushup-icon-xiaoxin8.png'
+import navOtherMask from './assets/imagegen2/nav-other-mask.png'
+import navSettingsMask from './assets/imagegen2/nav-settings-mask.png'
 
 type View = 'today' | 'plan' | 'progress' | 'other' | 'settings'
+
+const AUTHOR_WECHAT = 'ABC2023393253'
 
 const navItems: { id: View; label: string; icon: typeof House }[] = [
   { id: 'today', label: '训练', icon: House },
@@ -38,10 +47,88 @@ const navItems: { id: View; label: string; icon: typeof House }[] = [
   { id: 'settings', label: '设置', icon: GearSix },
 ]
 
-const liftIcons: Record<LiftId, string> = {
+const liftIcons: Partial<Record<LiftId, string>> = {
   squat: squatIcon,
   bench: benchIcon,
   deadlift: deadliftIcon,
+  curl: curlIcon,
+  press: pressIcon,
+}
+
+const liftSymbolText: Record<LiftId, string> = {
+  squat: '蹲',
+  bench: '推',
+  deadlift: '拉',
+  curl: '弯',
+  press: '推',
+}
+
+const WEEKDAY_OPTIONS: { value: Weekday; label: string }[] = [
+  { value: 1, label: '一' },
+  { value: 2, label: '二' },
+  { value: 3, label: '三' },
+  { value: 4, label: '四' },
+  { value: 5, label: '五' },
+  { value: 6, label: '六' },
+  { value: 7, label: '日' },
+]
+
+const majorLiftRank: Record<LiftId, number> = { squat: 0, bench: 1, deadlift: 2, press: 3, curl: 4 }
+const majorLifts = new Set<LiftId>(['squat', 'bench', 'deadlift'])
+
+function compareTrainingSessions(a: TrainingSession, b: TrainingSession) {
+  const dayDifference = (a.day ?? 8) - (b.day ?? 8)
+  if (dayDifference !== 0) return dayDifference
+
+  const majorDifference = Number(!majorLifts.has(a.lift)) - Number(!majorLifts.has(b.lift))
+  if (majorDifference !== 0) return majorDifference
+
+  const kindDifference = Number(a.kind !== 'main') - Number(b.kind !== 'main')
+  if (kindDifference !== 0) return kindDifference
+  return majorLiftRank[a.lift] - majorLiftRank[b.lift]
+}
+
+function WeekdayPicker({
+  lift,
+  frequency,
+  days,
+  onChange,
+  disabled = false,
+}: {
+  lift: LiftId
+  frequency: 1 | 2
+  days: Weekday[]
+  onChange: (days: Weekday[]) => void
+  disabled?: boolean
+}) {
+  const selectDay = (day: Weekday) => {
+    if (disabled) return
+    if (days.includes(day)) {
+      if (days.length === 1) return
+      onChange(days.filter((value) => value !== day))
+      return
+    }
+
+    const next = days.length < frequency ? [...days, day] : [days[0], day]
+    onChange(next as Weekday[])
+  }
+
+  return (
+    <div className="day-picker" role="group" aria-label={`${LIFT_NAMES[lift]}训练日`}>
+      {WEEKDAY_OPTIONS.map((option) => (
+        <button
+          type="button"
+          key={option.value}
+          disabled={disabled}
+          className={days.includes(option.value) ? 'selected' : ''}
+          onClick={() => selectDay(option.value)}
+        >
+          周{option.label}
+        </button>
+      ))}
+      <div className="day-picker-footer"><span>重日 {days[0] ? `周${WEEKDAY_OPTIONS.find((option) => option.value === days[0])?.label}` : '未选'}</span>{frequency === 2 && <><span>轻日 {days[1] ? `周${WEEKDAY_OPTIONS.find((option) => option.value === days[1])?.label}` : '未选'}</span>{days.length === 2 && <button type="button" disabled={disabled} className="day-swap" onClick={() => onChange([days[1], days[0]])}><Repeat />交换重日/轻日</button>}</>}</div>
+    </div>
+  )
 }
 
 export function App() {
@@ -95,6 +182,29 @@ export function App() {
     setToast('后续计划已更新。')
   }
 
+  const updateLiftSchedule = (lift: LiftId, days: Weekday[]) => {
+    setData((current) => current.plan ? {
+      ...current,
+      plan: {
+        ...current.plan,
+        config: {
+          ...current.plan.config,
+          lifts: { ...current.plan.config.lifts, [lift]: { ...current.plan.config.lifts[lift], days } },
+        },
+        sessions: current.plan.sessions.map((session) => {
+          if (session.lift !== lift || session.completedAt) return session
+          const day = days[session.kind === 'main' ? 0 : 1] ?? days[0]
+          return { ...session, day }
+        }),
+      },
+    } : current)
+  }
+
+  const updateLiftEnabled = (lift: LiftId, enabled: boolean) => {
+    setData((current) => current.plan ? { ...current, plan: setFlexibleLiftEnabled(current.plan, lift, enabled) } : current)
+    setToast(enabled ? `${LIFT_NAMES[lift]}已加入后续计划` : `${LIFT_NAMES[lift]}已从后续计划移除`)
+  }
+
   return (
     <div className="app-shell">
       <aside className="sidebar">
@@ -110,7 +220,7 @@ export function App() {
 
       <main className="main-content">
         {view === 'today' && <TodayView plan={plan} onStart={setActiveSessionId} />}
-        {view === 'plan' && <PlanView plan={plan} onStart={setActiveSessionId} />}
+        {view === 'plan' && <PlanView plan={plan} onStart={setActiveSessionId} onScheduleChange={updateLiftSchedule} onEnabledChange={updateLiftEnabled} />}
         {view === 'progress' && <ProgressView plan={plan} />}
         {view === 'other' && <OtherView armBandRecords={data.armBandRecords} pushUpRecords={data.pushUpRecords} setData={setData} notify={setToast} />}
         {view === 'settings' && <SettingsView data={data} setData={setData} notify={setToast} />}
@@ -143,7 +253,12 @@ function Brand() {
 
 function NavButton({ item, active, onClick }: { item: typeof navItems[number]; active: boolean; onClick: () => void }) {
   const Icon = item.icon
-  return <button className={active ? 'nav-button active' : 'nav-button'} onClick={onClick}><Icon weight={active ? 'fill' : 'regular'} /><span>{item.label}</span></button>
+  const navIcon = item.id === 'other'
+    ? <span className="nav-image-icon nav-image-icon-other" style={{ '--nav-mask': `url(${navOtherMask})` } as React.CSSProperties} aria-hidden="true" />
+    : item.id === 'settings'
+      ? <span className="nav-image-icon nav-image-icon-settings" style={{ '--nav-mask': `url(${navSettingsMask})` } as React.CSSProperties} aria-hidden="true" />
+      : <Icon weight={active ? 'fill' : 'regular'} />
+  return <button className={active ? 'nav-button active' : 'nav-button'} onClick={onClick}>{navIcon}<span>{item.label}</span></button>
 }
 
 function PlanSetup({ onCreate, onOpenOther }: { onCreate: (config: PlanConfig) => void; onOpenOther: () => void }) {
@@ -153,13 +268,29 @@ function PlanSetup({ onCreate, onOpenOther }: { onCreate: (config: PlanConfig) =
   const [growthRate, setGrowthRate] = useState(0.05)
   const [testAtEnd, setTestAtEnd] = useState(false)
   const [lifts, setLifts] = useState<PlanConfig['lifts']>({
-    squat: { oneRm: 120, frequency: 2 },
-    bench: { oneRm: 80, frequency: 2 },
-    deadlift: { oneRm: 150, frequency: 1 },
+    squat: { oneRm: 120, frequency: 2, enabled: true },
+    bench: { oneRm: 80, frequency: 2, enabled: true },
+    deadlift: { oneRm: 150, frequency: 1, enabled: true },
+    curl: { oneRm: 30, frequency: 1, enabled: false },
+    press: { oneRm: 50, frequency: 1, enabled: false },
   })
-  const valid = liftIds.every((lift) => lifts[lift].oneRm > 0) && weeks >= 4 && weeks <= 20
+  const valid = liftIds.every((lift) => {
+    const config = lifts[lift]
+    const optional = flexibleLiftIds.includes(lift)
+    return (optional && !config.enabled) || (Number.isFinite(config.oneRm) && config.oneRm > 0)
+  }) && weeks >= 4 && weeks <= 20
 
   const updateLift = (lift: LiftId, patch: Partial<PlanConfig['lifts'][LiftId]>) => setLifts((current) => ({ ...current, [lift]: { ...current[lift], ...patch } }))
+  const toggleLiftEnabled = (lift: LiftId, enabled: boolean) => updateLift(lift, { enabled })
+  const setFrequency = (lift: LiftId, frequency: 1 | 2) => setLifts((current) => {
+    const nextLifts = { ...current, [lift]: { ...current[lift], frequency } }
+    const setupConfig = { weeks, growthRate, testAtEnd, lifts: nextLifts }
+    const currentDays = current[lift].days ?? []
+    const fallbackDays = getDefaultLiftDays(setupConfig, lift)
+    const days = [...currentDays, ...fallbackDays.filter((day) => !currentDays.includes(day))].slice(0, frequency) as Weekday[]
+    return { ...current, [lift]: { ...current[lift], frequency, days } }
+  })
+  const setupConfig = { weeks, growthRate, testAtEnd, lifts }
 
   return (
     <main className="setup-page">
@@ -176,11 +307,15 @@ function PlanSetup({ onCreate, onOpenOther }: { onCreate: (config: PlanConfig) =
           {step === 1 ? (
             <div className="lift-inputs">
               {liftIds.map((lift) => (
-                <div className="lift-input" key={lift}>
-                  <div><label htmlFor={`${lift}-rm`}>{LIFT_NAMES[lift]}</label><small>当前 1RM</small></div>
-                  <div className="weight-field"><input id={`${lift}-rm`} type="number" min="2.5" step="2.5" value={lifts[lift].oneRm} onChange={(event) => updateLift(lift, { oneRm: Number(event.target.value) })} /><span>kg</span></div>
+                <div className={`lift-input ${flexibleLiftIds.includes(lift) && !lifts[lift].enabled ? 'optional-disabled' : ''}`} key={lift}>
+                  <div>
+                    <label htmlFor={`${lift}-rm`}>{LIFT_NAMES[lift]}</label>
+                    <small>{flexibleLiftIds.includes(lift) ? '可选动作 · 当前 1RM' : '当前 1RM'}</small>
+                    {flexibleLiftIds.includes(lift) && <label className="lift-enable-toggle"><input type="checkbox" checked={Boolean(lifts[lift].enabled)} onChange={(event) => toggleLiftEnabled(lift, event.target.checked)} /><span>加入计划</span></label>}
+                  </div>
+                  <div className="weight-field"><input id={`${lift}-rm`} type="number" min="2.5" step="2.5" value={lifts[lift].oneRm} disabled={flexibleLiftIds.includes(lift) && !lifts[lift].enabled} onChange={(event) => updateLift(lift, { oneRm: Number(event.target.value) })} /><span>kg</span></div>
                   <div className="frequency-control" aria-label={`${LIFT_NAMES[lift]}每周频率`}>
-                    {[1, 2].map((frequency) => <button key={frequency} className={lifts[lift].frequency === frequency ? 'selected' : ''} onClick={() => updateLift(lift, { frequency: frequency as 1 | 2 })}>每周 {frequency} 次</button>)}
+                    {[1, 2].map((frequency) => <button type="button" disabled={flexibleLiftIds.includes(lift) && !lifts[lift].enabled} key={frequency} className={lifts[lift].frequency === frequency ? 'selected' : ''} onClick={() => setFrequency(lift, frequency as 1 | 2)}>每周 {frequency} 次</button>)}
                   </div>
                 </div>
               ))}
@@ -189,6 +324,7 @@ function PlanSetup({ onCreate, onOpenOther }: { onCreate: (config: PlanConfig) =
             <div className="cycle-options">
               <fieldset><legend>训练周期</legend><div className="option-grid">{[6, 8, 9, 12].map((value) => <button key={value} className={!customWeeks && weeks === value ? 'selected' : ''} onClick={() => { setWeeks(value); setCustomWeeks(false) }}>{value} 周</button>)}<button className={customWeeks ? 'selected' : ''} onClick={() => setCustomWeeks(true)}>自定义</button></div>{customWeeks && <label className="custom-weeks">周期周数<input type="number" min="4" max="20" value={weeks} onChange={(event) => setWeeks(Number(event.target.value))} /></label>}</fieldset>
               <fieldset><legend>目标增幅</legend><div className="growth-options">{[{ label: '保守', value: 0.025 }, { label: '标准', value: 0.05 }, { label: '激进', value: 0.075 }].map((option) => <button key={option.label} className={growthRate === option.value ? 'selected' : ''} onClick={() => setGrowthRate(option.value)}><strong>{option.label}</strong><span>+{option.value * 100}%</span></button>)}</div><label className="range-label"><span>微调目标增幅 <strong>{Math.round(growthRate * 1000) / 10}%</strong></span><input type="range" min="1" max="10" step="0.5" value={growthRate * 100} onChange={(event) => setGrowthRate(Number(event.target.value) / 100)} /></label></fieldset>
+              <fieldset className="schedule-fieldset"><legend>训练日安排</legend>{liftIds.map((lift) => { const enabled = !flexibleLiftIds.includes(lift) || Boolean(lifts[lift].enabled); return <div className={`schedule-row ${!enabled ? 'schedule-row-disabled' : ''}`} key={lift}><div className="schedule-row-heading"><div><strong>{LIFT_NAMES[lift]}</strong><small>{enabled ? (lifts[lift].frequency === 2 ? '选择重日和轻日' : '选择重训练日') : '未加入计划'}</small></div></div><WeekdayPicker lift={lift} frequency={lifts[lift].frequency} days={lifts[lift].days ?? getDefaultLiftDays(setupConfig, lift)} disabled={!enabled} onChange={(days) => updateLift(lift, { days })} /></div> })}</fieldset>
               <label className="toggle-row"><span><strong>周期末测试目标 1RM</strong><small>关闭时安排高强度低次数训练</small></span><input type="checkbox" checked={testAtEnd} onChange={(event) => setTestAtEnd(event.target.checked)} /></label>
             </div>
           )}
@@ -241,13 +377,29 @@ function OtherView({ armBandRecords, pushUpRecords, setData, notify, standalone 
       {standalone && <header className="other-standalone-header"><Brand /><button className="secondary-button" onClick={onBack}><House />返回计划</button></header>}
       <PageHeader eyebrow="其它训练" title="其它" detail="记录臂力棒和俯卧撑，数据只保存在当前浏览器，不影响三大项周期计划。" />
       <div className="other-tabs" role="tablist" aria-label="其它训练类型">
-        <button type="button" role="tab" aria-selected={tab === 'armband'} className={tab === 'armband' ? 'active' : ''} onClick={() => setTab('armband')}><HandFist />臂力棒</button>
-        <button type="button" role="tab" aria-selected={tab === 'pushup'} className={tab === 'pushup' ? 'active' : ''} onClick={() => setTab('pushup')}><Repeat />俯卧撑</button>
+        <button type="button" role="tab" aria-selected={tab === 'armband'} className={tab === 'armband' ? 'active' : ''} onClick={() => setTab('armband')}><img className="other-tab-icon" src={armBandTabIcon} alt="" />臂力棒</button>
+        <button type="button" role="tab" aria-selected={tab === 'pushup'} className={tab === 'pushup' ? 'active' : ''} onClick={() => setTab('pushup')}><img className="other-tab-icon" src={pushUpTabIcon} alt="" />俯卧撑</button>
       </div>
+      <OtherTrainingTools />
       {tab === 'armband'
         ? <ArmBandView records={armBandRecords} setData={setData} notify={notify} />
         : <PushUpView records={pushUpRecords} setData={setData} notify={notify} />}
     </div>
+  )
+}
+
+function OtherTrainingTools() {
+  const [completedSets, setCompletedSets] = useState(0)
+
+  return (
+    <section className="other-tools" aria-label="其它训练辅助">
+      <div className="section-heading"><div><h2>训练辅助</h2><span>记录组间休息和本次完成组数</span></div><button className="text-button other-tools-reset" type="button" onClick={() => setCompletedSets(0)}>清零组数</button></div>
+      <RestTimer initialSeconds={90} onDefaultChange={() => undefined} />
+      <div className="set-counter">
+        <div className="set-counter-display"><span>已完成组数</span><div><strong>{completedSets}</strong><small>组</small></div></div>
+        <div className="set-counter-actions"><button type="button" className="set-counter-button" title="撤销一组" aria-label="撤销一组" disabled={completedSets === 0} onClick={() => setCompletedSets((value) => Math.max(0, value - 1))}><Minus /></button><button type="button" className="set-counter-button primary" title="完成一组" aria-label="完成一组" onClick={() => setCompletedSets((value) => value + 1)}><Plus /></button></div>
+      </div>
+    </section>
   )
 }
 
@@ -317,7 +469,6 @@ function ArmBandView({ records, setData, notify }: {
   return (
       <div className="armband-layout">
         <section className="armband-form-panel">
-          <div className="armband-image-placeholder"><img src={armBandImage} alt="臂力棒" /></div>
           <div className="section-heading"><h2>{editingId ? '修改记录' : '记录一次训练'}</h2><span>每次填写一条</span></div>
           <fieldset className="armband-fieldset">
             <legend>阻力类型</legend>
@@ -353,7 +504,7 @@ function ArmBandView({ records, setData, notify }: {
               <div className="armband-record-main"><div><strong>{record.difficulty === 'extreme' ? '极难' : '普通'} · {record.resistance} kg</strong><small>{record.sets} 组 × {record.reps} 次 · 共 {record.sets * record.reps} 次</small></div><time>{formatArmBandDate(record.recordedAt)}</time></div>
               <div className="armband-record-actions"><button title="编辑记录" aria-label="编辑记录" onClick={() => editRecord(record)}><PencilSimple /></button><button title="删除记录" aria-label="删除记录" onClick={() => deleteRecord(record.id)}><Trash /></button></div>
             </article>
-          ))}</div> : <div className="armband-empty"><HandFist /><strong>还没有臂力棒记录</strong><span>完成一次训练后，记录会显示在这里。</span></div>}
+          ))}</div> : <div className="armband-empty"><img className="history-image-icon history-image-icon-armband" src={armBandTabIcon} alt="" /><strong>还没有臂力棒记录</strong><span>完成一次训练后，记录会显示在这里。</span></div>}
         </section>
       </div>
   )
@@ -461,7 +612,7 @@ function PushUpView({ records, setData, notify }: {
             <div className="armband-record-main"><div><strong>{record.loadType === 'weighted' ? `负重 ${record.weight} kg` : '自重'} 俯卧撑</strong><small>{record.sets} 组 × {record.reps} 次 · 共 {record.sets * record.reps} 次</small></div><time>{formatArmBandDate(record.recordedAt)}</time></div>
             <div className="armband-record-actions"><button title="编辑记录" aria-label="编辑记录" onClick={() => editRecord(record)}><PencilSimple /></button><button title="删除记录" aria-label="删除记录" onClick={() => deleteRecord(record.id)}><Trash /></button></div>
           </article>
-        ))}</div> : <div className="armband-empty"><Repeat /><strong>还没有俯卧撑记录</strong><span>完成一次训练后，记录会显示在这里。</span></div>}
+        ))}</div> : <div className="armband-empty"><img className="history-image-icon" src={pushUpTabIcon} alt="" /><strong>还没有俯卧撑记录</strong><span>完成一次训练后，记录会显示在这里。</span></div>}
       </section>
     </div>
   )
@@ -479,7 +630,7 @@ function getCurrentWeek(plan: AppData['plan']) {
 
 function TodayView({ plan, onStart }: { plan: NonNullable<AppData['plan']>; onStart: (id: string) => void }) {
   const currentWeek = getCurrentWeek(plan)
-  const sessions = plan.sessions.filter((session) => session.week === currentWeek)
+  const sessions = plan.sessions.filter((session) => session.week === currentWeek).sort(compareTrainingSessions)
   const done = sessions.filter((session) => session.completedAt).length
 
   return (
@@ -495,7 +646,7 @@ function TodayView({ plan, onStart }: { plan: NonNullable<AppData['plan']>; onSt
       </section>
       <section className="targets-strip">
         <h2>本周期目标</h2>
-        <div>{liftIds.map((lift) => <span key={lift}><small>{LIFT_NAMES[lift]}</small><strong>{plan.targets[lift]} kg</strong></span>)}</div>
+        <div>{liftIds.filter((lift) => plan.config.lifts[lift].enabled !== false).map((lift) => <span key={lift}><small>{LIFT_NAMES[lift]}</small><strong>{plan.targets[lift]} kg</strong></span>)}</div>
       </section>
     </div>
   )
@@ -504,22 +655,38 @@ function TodayView({ plan, onStart }: { plan: NonNullable<AppData['plan']>; onSt
 function SessionRow({ session, onStart }: { session: TrainingSession; onStart: () => void }) {
   const failed = session.results.includes('failed')
   const completedSets = session.results.filter((result) => result === 'done').length
+  const dayLabel = session.day ? WEEKDAY_OPTIONS.find((option) => option.value === session.day)?.label : ''
   return (
     <article className={`session-row ${session.completedAt ? 'completed' : ''}`}>
-      <div className={`lift-symbol lift-symbol-${session.lift}`} aria-hidden="true"><img src={liftIcons[session.lift]} alt="" /></div>
-      <div className="session-main"><span>{LIFT_NAMES[session.lift]} · {session.kind === 'main' ? '重训练' : '轻训练'}</span><strong>{session.weight} kg</strong><small>{session.sets} 组 × {session.reps} 次 · {Math.round(session.intensity * 1000) / 10}%</small></div>
+      <div className={`lift-symbol lift-symbol-${session.lift} lift-symbol-${session.kind}`} aria-hidden="true">{liftIcons[session.lift] ? <img src={liftIcons[session.lift]} alt="" /> : <span className="lift-symbol-text">{liftSymbolText[session.lift]}</span>}</div>
+      <div className="session-main"><span>{LIFT_NAMES[session.lift]} / {dayLabel ? `周${dayLabel} / ` : ''}{session.kind === 'main' ? '重训练' : '轻训练'}</span><strong>{session.weight} kg</strong><small>{session.sets} 组 × {session.reps} 次 / {Math.round(session.intensity * 1000) / 10}%</small></div>
       {session.completedAt ? <span className={failed ? 'status failed' : 'status success'}>{failed ? '未完成' : '已完成'}</span> : <button className="start-button" onClick={onStart}><Play weight="fill" />开始</button>}
       {!session.completedAt && completedSets > 0 && <small className="resume-note">已记录 {completedSets} 组</small>}
     </article>
   )
 }
 
-function PlanView({ plan, onStart }: { plan: NonNullable<AppData['plan']>; onStart: (id: string) => void }) {
+function PlanView({ plan, onStart, onScheduleChange, onEnabledChange }: { plan: NonNullable<AppData['plan']>; onStart: (id: string) => void; onScheduleChange: (lift: LiftId, days: Weekday[]) => void; onEnabledChange: (lift: LiftId, enabled: boolean) => void }) {
   const [week, setWeek] = useState(getCurrentWeek(plan))
-  const sessions = plan.sessions.filter((session) => session.week === week)
+  const sessions = plan.sessions.filter((session) => session.week === week).sort(compareTrainingSessions)
   return (
     <div className="page">
       <PageHeader eyebrow="完整周期" title="你的训练路线" detail="每一次调整都会保留历史，只改变尚未开始的训练。" />
+      <section className="schedule-editor">
+        <div className="section-heading"><div><h2>训练日安排</h2><span>默认按周一、周二、周三顺延，可随时调整</span></div><small>每周 1 或 2 次</small></div>
+        <div className="schedule-fieldset">
+          {liftIds.map((lift) => {
+            const config = plan.config.lifts[lift]
+            const optional = flexibleLiftIds.includes(lift)
+            const enabled = config?.enabled !== false
+            const days = getLiftDays(plan.config, lift)
+            return <div className={`schedule-row ${!enabled ? 'schedule-row-disabled' : ''}`} key={lift}>
+              <div className="schedule-row-heading"><div><strong>{LIFT_NAMES[lift]}</strong><small>{enabled ? `每周 ${config.frequency} 次` : '创建周期时未加入计划'}</small></div>{optional && <label className="schedule-enable-toggle"><input type="checkbox" checked={enabled} onChange={(event) => onEnabledChange(lift, event.target.checked)} /><span>{enabled ? '已加入计划' : '加入计划'}</span></label>}</div>
+              <WeekdayPicker lift={lift} frequency={config?.frequency ?? 1} days={days} disabled={!enabled} onChange={(nextDays) => onScheduleChange(lift, nextDays)} />
+            </div>
+          })}
+        </div>
+      </section>
       <div className="week-tabs" role="tablist">{Array.from({ length: plan.config.weeks }, (_, index) => index + 1).map((value) => <button role="tab" aria-selected={week === value} className={week === value ? 'active' : ''} key={value} onClick={() => setWeek(value)}>第 {value} 周</button>)}</div>
       <section className="plan-week-header"><div><span>第 {week} 周</span><strong>{sessions[0]?.intensity ? `${Math.round(sessions[0].intensity * 1000) / 10}% 强度起` : ''}</strong></div><small>{sessions.filter((session) => session.completedAt).length} / {sessions.length} 已完成</small></section>
       <div className="session-list plan-list">{sessions.map((session) => <SessionRow key={session.id} session={session} onStart={() => onStart(session.id)} />)}</div>
@@ -539,10 +706,10 @@ function ProgressView({ plan }: { plan: NonNullable<AppData['plan']> }) {
         <div><span>按计划完成</span><strong>{successes.length}</strong><small>次训练</small></div>
         <div><span>剩余周期</span><strong>{Math.max(0, plan.config.weeks - getCurrentWeek(plan) + 1)}</strong><small>周</small></div>
       </section>
-      <section className="section-block lift-progress"><div className="section-heading"><h2>三大项进度</h2></div>{liftIds.map((lift) => {
+      <section className="section-block lift-progress"><div className="section-heading"><h2>动作进度</h2></div>{liftIds.filter((lift) => plan.config.lifts[lift].enabled !== false).map((lift) => {
         const all = plan.sessions.filter((session) => session.lift === lift)
         const liftDone = all.filter((session) => session.completedAt).length
-        return <div className="lift-progress-row" key={lift}><div><strong>{LIFT_NAMES[lift]}</strong><small>{plan.config.lifts[lift].oneRm} → {plan.targets[lift]} kg</small></div><div className="progress-track"><span style={{ width: `${liftDone / all.length * 100}%` }} /></div><b>{liftDone}/{all.length}</b></div>
+        return <div className="lift-progress-row" key={lift}><div><strong>{LIFT_NAMES[lift]}</strong><small>{plan.config.lifts[lift].oneRm} → {plan.targets[lift]} kg</small></div><div className="progress-track"><span style={{ width: `${all.length ? liftDone / all.length * 100 : 0}%` }} /></div><b>{liftDone}/{all.length}</b></div>
       })}</section>
       <section className="section-block"><div className="section-heading"><h2>最近训练</h2></div>{completed.length ? <div className="history-list">{completed.slice(-6).reverse().map((session) => <div key={session.id}><span className={session.results.includes('failed') ? 'history-icon failure' : 'history-icon'}>{session.results.includes('failed') ? <X /> : <Check />}</span><div><strong>{LIFT_NAMES[session.lift]} · 第 {session.week} 周</strong><small>{session.weight}kg · {session.sets}×{session.reps}</small></div><time>{new Date(session.completedAt!).toLocaleDateString('zh-CN', { month: 'numeric', day: 'numeric' })}</time></div>)}</div> : <EmptyState />}</section>
     </div>
@@ -643,6 +810,10 @@ function AdjustmentSheet({ session, onChoose, onSkip }: { session: TrainingSessi
   return <div className="sheet-backdrop" role="dialog" aria-modal="true"><section className="adjustment-sheet"><div className="sheet-handle" /><span className="kicker">训练调整</span><h2>{LIFT_NAMES[session.lift]}没有全部完成</h2><p>{getFailureAdvice(session)}</p><div className="adjustment-list">{choices.map((choice) => <button key={choice.id} onClick={() => onChoose(choice.id)}><span><strong>{choice.title}</strong><small>{choice.detail}</small></span><ArrowRight /></button>)}</div><button className="text-button" onClick={onSkip}>暂不调整</button></section></div>
 }
 
+function ContactAuthorSection({ onCopy }: { onCopy: () => void }) {
+  return <section className="settings-section contact-author-section"><h2>联系作者</h2><div className="contact-author-row"><span className="setting-icon contact-author-icon"><WechatLogo /></span><span><strong>微信号</strong><small>{AUTHOR_WECHAT}</small></span><button className="copy-contact-button" type="button" onClick={onCopy} aria-label="复制微信号" title="复制微信号"><CopySimple /></button></div></section>
+}
+
 function SettingsView({ data, setData, notify }: { data: AppData; setData: React.Dispatch<React.SetStateAction<AppData>>; notify: (message: string) => void }) {
   const fileRef = useRef<HTMLInputElement>(null)
   const exportData = () => {
@@ -667,5 +838,13 @@ function SettingsView({ data, setData, notify }: { data: AppData; setData: React
   const reset = () => {
     if (window.confirm('确定删除当前周期吗？训练记录也会一起删除。')) setData(defaultData)
   }
-  return <div className="page"><PageHeader eyebrow="偏好与数据" title="设置" detail="数据只留在这台设备的当前浏览器中，请定期导出备份。" /><section className="settings-section"><h2>默认休息时长</h2>{liftIds.map((lift) => <label className="setting-row" key={lift}><span><strong>{LIFT_NAMES[lift]}</strong><small>每次可在计时器内微调</small></span><select value={data.restSeconds[lift]} onChange={(event) => setData((current) => ({ ...current, restSeconds: { ...current.restSeconds, [lift]: Number(event.target.value) } }))}>{[90, 120, 150, 180, 210, 240, 300].map((seconds) => <option value={seconds} key={seconds}>{Math.floor(seconds / 60)}分{seconds % 60 ? `${seconds % 60}秒` : ''}</option>)}</select></label>)}</section><section className="settings-section"><h2>数据备份</h2><button className="setting-action" onClick={exportData}><span className="setting-icon"><DownloadSimple /></span><span><strong>导出备份</strong><small>保存为 JSON 文件</small></span><ArrowRight /></button><button className="setting-action" onClick={() => fileRef.current?.click()}><span className="setting-icon"><UploadSimple /></span><span><strong>导入备份</strong><small>恢复此前导出的训练数据</small></span><ArrowRight /></button><input ref={fileRef} hidden type="file" accept="application/json" onChange={(event) => void importData(event.target.files?.[0])} /></section><section className="settings-section danger-zone"><h2>当前周期</h2><button className="setting-action danger" onClick={reset}><span className="setting-icon"><Trash /></span><span><strong>删除并重新开始</strong><small>此操作无法撤销，建议先导出备份</small></span><ArrowRight /></button></section></div>
+  const copyWechatId = async () => {
+    try {
+      await navigator.clipboard.writeText(AUTHOR_WECHAT)
+      notify('微信号已复制')
+    } catch {
+      notify(`复制失败，请手动添加 ${AUTHOR_WECHAT}`)
+    }
+  }
+  return <div className="page"><PageHeader eyebrow="偏好与数据" title="设置" detail="数据只留在这台设备的当前浏览器中，请定期导出备份。" /><section className="settings-section"><h2>默认休息时长</h2>{liftIds.map((lift) => <label className="setting-row" key={lift}><span><strong>{LIFT_NAMES[lift]}</strong><small>每次可在计时器内微调</small></span><select value={data.restSeconds[lift]} onChange={(event) => setData((current) => ({ ...current, restSeconds: { ...current.restSeconds, [lift]: Number(event.target.value) } }))}>{[90, 120, 150, 180, 210, 240, 300].map((seconds) => <option value={seconds} key={seconds}>{Math.floor(seconds / 60)}分{seconds % 60 ? `${seconds % 60}秒` : ''}</option>)}</select></label>)}</section><section className="settings-section"><h2>数据备份</h2><button className="setting-action" onClick={exportData}><span className="setting-icon"><DownloadSimple /></span><span><strong>导出备份</strong><small>保存为 JSON 文件</small></span><ArrowRight /></button><button className="setting-action" onClick={() => fileRef.current?.click()}><span className="setting-icon"><UploadSimple /></span><span><strong>导入备份</strong><small>恢复此前导出的训练数据</small></span><ArrowRight /></button><input ref={fileRef} hidden type="file" accept="application/json" onChange={(event) => void importData(event.target.files?.[0])} /></section><ContactAuthorSection onCopy={() => void copyWechatId()} /><section className="settings-section danger-zone"><h2>当前周期</h2><button className="setting-action danger" onClick={reset}><span className="setting-icon"><Trash /></span><span><strong>删除并重新开始</strong><small>此操作无法撤销，建议先导出备份</small></span><ArrowRight /></button></section></div>
 }

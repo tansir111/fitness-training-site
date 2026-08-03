@@ -1,6 +1,54 @@
-import type { LiftId, PlanConfig, TrainingPlan, TrainingSession } from './types'
+import type { LiftConfig, LiftId, PlanConfig, TrainingPlan, TrainingSession, Weekday } from './types'
 
-export const liftIds: LiftId[] = ['squat', 'bench', 'deadlift']
+export const liftIds: LiftId[] = ['squat', 'bench', 'deadlift', 'curl', 'press']
+export const flexibleLiftIds: LiftId[] = ['curl', 'press']
+
+export const DEFAULT_LIFT_DAYS: Record<LiftId, Weekday[]> = {
+  squat: [1, 4],
+  bench: [1, 3],
+  deadlift: [2],
+  curl: [2],
+  press: [3],
+}
+
+export const DEFAULT_LIFT_CONFIGS: Record<LiftId, LiftConfig> = {
+  squat: { oneRm: 120, frequency: 2, days: DEFAULT_LIFT_DAYS.squat, enabled: true },
+  bench: { oneRm: 80, frequency: 2, days: DEFAULT_LIFT_DAYS.bench, enabled: true },
+  deadlift: { oneRm: 150, frequency: 1, days: DEFAULT_LIFT_DAYS.deadlift, enabled: true },
+  curl: { oneRm: 30, frequency: 1, days: DEFAULT_LIFT_DAYS.curl, enabled: false },
+  press: { oneRm: 50, frequency: 1, days: DEFAULT_LIFT_DAYS.press, enabled: false },
+}
+
+function normalizeDays(days: Weekday[] | undefined, fallback: Weekday[], frequency: 1 | 2): Weekday[] {
+  const valid = (days ?? []).filter((day): day is Weekday => Number.isInteger(day) && day >= 1 && day <= 7)
+  const unique = [...new Set(valid)]
+  const merged = [...unique, ...fallback.filter((day) => !unique.includes(day))]
+  return (merged.length ? merged : [1]).slice(0, frequency) as Weekday[]
+}
+
+export function getLiftDays(config: PlanConfig, lift: LiftId): Weekday[] {
+  const liftConfig = config.lifts[lift] ?? DEFAULT_LIFT_CONFIGS[lift]
+  return normalizeDays(liftConfig.days, getDefaultLiftDays(config, lift), liftConfig.frequency)
+}
+
+export function normalizePlanConfig(config: PlanConfig): PlanConfig {
+  const lifts = {} as Record<LiftId, LiftConfig>
+  const configuredLifts = config.lifts ?? ({} as Record<LiftId, LiftConfig>)
+  for (const lift of liftIds) {
+    const fallback = DEFAULT_LIFT_CONFIGS[lift]
+    const current = configuredLifts[lift] ?? fallback
+    const frequency = current.frequency === 2 ? 2 : 1
+    const oneRm = Number.isFinite(current.oneRm) && current.oneRm > 0 ? current.oneRm : fallback.oneRm
+    lifts[lift] = {
+      ...current,
+      oneRm,
+      frequency,
+      enabled: current.enabled ?? (flexibleLiftIds.includes(lift) ? false : true),
+      days: normalizeDays(current.days, getDefaultLiftDays({ ...config, lifts: configuredLifts }, lift), frequency),
+    }
+  }
+  return { ...config, lifts }
+}
 
 const weeklyOrder: { lift: LiftId; kind: 'main' | 'light' }[] = [
   { lift: 'bench', kind: 'main' },
@@ -9,7 +57,29 @@ const weeklyOrder: { lift: LiftId; kind: 'main' | 'light' }[] = [
   { lift: 'bench', kind: 'light' },
   { lift: 'deadlift', kind: 'main' },
   { lift: 'squat', kind: 'light' },
+  { lift: 'press', kind: 'main' },
+  { lift: 'curl', kind: 'main' },
+  { lift: 'press', kind: 'light' },
+  { lift: 'curl', kind: 'light' },
 ]
+
+const sessionOrder = new Map(weeklyOrder.map((slot, index) => [`${slot.lift}-${slot.kind}`, index]))
+
+export function getDefaultLiftDays(config: PlanConfig, lift: LiftId): Weekday[] {
+  const activeSlots = weeklyOrder.filter((slot) => {
+    const fallback = DEFAULT_LIFT_CONFIGS[slot.lift]
+    const current = config.lifts?.[slot.lift] ?? fallback
+    const enabled = current.enabled ?? !flexibleLiftIds.includes(slot.lift)
+    return enabled && (slot.kind === 'main' || current.frequency === 2)
+  })
+  const daysByLift: Partial<Record<LiftId, Weekday[]>> = {}
+  activeSlots.forEach((slot, index) => {
+    const days = daysByLift[slot.lift] ?? []
+    days.push(((index % 7) + 1) as Weekday)
+    daysByLift[slot.lift] = days
+  })
+  return daysByLift[lift]?.slice(0, config.lifts?.[lift]?.frequency ?? DEFAULT_LIFT_CONFIGS[lift].frequency) ?? DEFAULT_LIFT_DAYS[lift]
+}
 
 export function roundToPlate(weight: number): number {
   return Math.round(weight / 2.5) * 2.5
@@ -27,15 +97,16 @@ function prescription(progress: number) {
 }
 
 export function generatePlan(config: PlanConfig): TrainingPlan {
+  const normalizedConfig = normalizePlanConfig(config)
   const targets = Object.fromEntries(
-    liftIds.map((lift) => [lift, roundToPlate(config.lifts[lift].oneRm * (1 + config.growthRate))]),
+    liftIds.map((lift) => [lift, roundToPlate(normalizedConfig.lifts[lift].oneRm * (1 + normalizedConfig.growthRate))]),
   ) as Record<LiftId, number>
 
   const sessions: TrainingSession[] = []
-  for (let week = 1; week <= config.weeks; week += 1) {
-    const progress = config.weeks === 1 ? 1 : (week - 1) / (config.weeks - 1)
+  for (let week = 1; week <= normalizedConfig.weeks; week += 1) {
+    const progress = normalizedConfig.weeks === 1 ? 1 : (week - 1) / (normalizedConfig.weeks - 1)
     let weekPlan = prescription(progress)
-    const isDeload = config.weeks >= 10 && week % 4 === 0 && week !== config.weeks
+    const isDeload = normalizedConfig.weeks >= 10 && week % 4 === 0 && week !== normalizedConfig.weeks
     if (isDeload) {
       weekPlan = {
         intensity: Math.max(0.65, weekPlan.intensity - 0.075),
@@ -44,7 +115,7 @@ export function generatePlan(config: PlanConfig): TrainingPlan {
       }
     }
 
-    const isTest = config.testAtEnd && week === config.weeks
+    const isTest = normalizedConfig.testAtEnd && week === normalizedConfig.weeks
     const main = isTest ? { intensity: 1, sets: 1, reps: 1 } : weekPlan
     const light = {
       intensity: Math.max(0.55, main.intensity * 0.82),
@@ -53,16 +124,56 @@ export function generatePlan(config: PlanConfig): TrainingPlan {
     }
 
     for (const slot of weeklyOrder) {
-      if (slot.kind === 'light' && config.lifts[slot.lift].frequency !== 2) continue
-      sessions.push(makeSession(week, slot.lift, slot.kind, targets[slot.lift], slot.kind === 'main' ? main : light))
+      if (!normalizedConfig.lifts[slot.lift].enabled) continue
+      if (slot.kind === 'light' && normalizedConfig.lifts[slot.lift].frequency !== 2) continue
+      const days = getLiftDays(normalizedConfig, slot.lift)
+      const day = days[slot.kind === 'main' ? 0 : 1]
+      sessions.push(makeSession(week, slot.lift, slot.kind, targets[slot.lift], slot.kind === 'main' ? main : light, day))
     }
   }
 
   return {
     id: crypto.randomUUID(),
     createdAt: new Date().toISOString(),
-    config,
+    config: normalizedConfig,
     targets,
+    sessions,
+  }
+}
+
+export function setFlexibleLiftEnabled(plan: TrainingPlan, lift: LiftId, enabled: boolean): TrainingPlan {
+  if (!flexibleLiftIds.includes(lift)) return plan
+
+  const configSeed = {
+    ...plan.config,
+    lifts: {
+      ...plan.config.lifts,
+      [lift]: { ...plan.config.lifts[lift], enabled },
+    },
+  }
+  if (enabled) {
+    configSeed.lifts[lift] = { ...configSeed.lifts[lift], days: getDefaultLiftDays(configSeed, lift) }
+  }
+  const config = normalizePlanConfig(configSeed)
+  const targetPlan = generatePlan(config)
+  const firstOpenWeek = plan.sessions.reduce(
+    (week, session) => session.completedAt ? week : Math.min(week, session.week),
+    plan.config.weeks + 1,
+  )
+  const keepSessions = plan.sessions.filter((session) => !(session.lift === lift && !session.completedAt))
+  const existingIds = new Set(keepSessions.map((session) => session.id))
+  const addedSessions = enabled
+    ? targetPlan.sessions.filter((session) => session.lift === lift && session.week >= firstOpenWeek && !existingIds.has(session.id))
+    : []
+  const sessions = [...keepSessions, ...addedSessions].sort((a, b) => {
+    if (a.week !== b.week) return a.week - b.week
+    return (sessionOrder.get(`${a.lift}-${a.kind}`) ?? weeklyOrder.length) - (sessionOrder.get(`${b.lift}-${b.kind}`) ?? weeklyOrder.length)
+  })
+
+  return {
+    ...plan,
+    config,
+    targets: { ...plan.targets, [lift]: targetPlan.targets[lift] },
     sessions,
   }
 }
@@ -73,6 +184,7 @@ function makeSession(
   kind: 'main' | 'light',
   target: number,
   prescription: { intensity: number; sets: number; reps: number },
+  day?: Weekday,
 ): TrainingSession {
   return {
     id: `${week}-${lift}-${kind}`,
@@ -84,6 +196,7 @@ function makeSession(
     sets: prescription.sets,
     reps: prescription.reps,
     results: Array.from({ length: prescription.sets }, () => 'pending'),
+    day,
   }
 }
 

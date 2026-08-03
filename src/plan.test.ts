@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { applyAdjustment, generatePlan, roundToPlate } from './plan'
+import { applyAdjustment, generatePlan, roundToPlate, setFlexibleLiftEnabled } from './plan'
 import { normalizeData, normalizePlan } from './storage'
 import type { AppData, PlanConfig } from './types'
 
@@ -8,9 +8,11 @@ const config: PlanConfig = {
   growthRate: 0.05,
   testAtEnd: false,
   lifts: {
-    squat: { oneRm: 120, frequency: 2 },
-    bench: { oneRm: 80, frequency: 2 },
-    deadlift: { oneRm: 150, frequency: 1 },
+    squat: { oneRm: 120, frequency: 2, days: [1, 4], enabled: true },
+    bench: { oneRm: 80, frequency: 2, days: [1, 3], enabled: true },
+    deadlift: { oneRm: 150, frequency: 1, days: [2], enabled: true },
+    curl: { oneRm: 30, frequency: 1, days: [2], enabled: false },
+    press: { oneRm: 50, frequency: 1, days: [3], enabled: false },
   },
 }
 
@@ -23,7 +25,7 @@ describe('plan generation', () => {
   it('generates main and light sessions from each lift frequency', () => {
     const plan = generatePlan(config)
     expect(plan.sessions).toHaveLength(45)
-    expect(plan.targets).toEqual({ squat: 125, bench: 85, deadlift: 157.5 })
+    expect(plan.targets).toEqual({ squat: 125, bench: 85, deadlift: 157.5, curl: 32.5, press: 52.5 })
 
     expect(plan.sessions.slice(0, 5).map((session) => `${session.lift}-${session.kind}`)).toEqual([
       'bench-main', 'squat-main', 'bench-light', 'deadlift-main', 'squat-light',
@@ -76,6 +78,54 @@ describe('plan generation', () => {
     expect(adjusted.sessions.find((session) => session.id === '4-squat-main')?.weight)
       .toBe(plan.sessions.find((session) => session.id === '4-squat-main')?.weight)
   })
+
+  it('keeps optional lifts out of a plan until enabled', () => {
+    const plan = generatePlan(config)
+    expect(plan.sessions.some((session) => session.lift === 'curl' || session.lift === 'press')).toBe(false)
+  })
+
+  it('generates optional lifts with their selected training day', () => {
+    const plan = generatePlan({
+      ...config,
+      lifts: {
+        ...config.lifts,
+        curl: { oneRm: 30, frequency: 2, days: [4, 6], enabled: true },
+      },
+    })
+    const curlSessions = plan.sessions.filter((session) => session.lift === 'curl')
+    expect(curlSessions).toHaveLength(2 * config.weeks)
+    expect(curlSessions.filter((session) => session.kind === 'main').every((session) => session.day === 4)).toBe(true)
+    expect(curlSessions.filter((session) => session.kind === 'light').every((session) => session.day === 6)).toBe(true)
+  })
+
+  it('preserves heavy and light roles when the heavy day is later in the week', () => {
+    const plan = generatePlan({
+      ...config,
+      lifts: {
+        ...config.lifts,
+        curl: { oneRm: 30, frequency: 2, days: [6, 2], enabled: true },
+      },
+    })
+    expect(plan.sessions.find((session) => session.id === '1-curl-main')?.day).toBe(6)
+    expect(plan.sessions.find((session) => session.id === '1-curl-light')?.day).toBe(2)
+  })
+
+  it('can add and remove an optional lift after the cycle is created', () => {
+    const base = generatePlan(config)
+    const enabled = setFlexibleLiftEnabled(base, 'press', true)
+    expect(enabled.config.lifts.press.enabled).toBe(true)
+    expect(enabled.sessions.filter((session) => session.lift === 'press')).toHaveLength(config.weeks)
+    expect(enabled.sessions.find((session) => session.id === '1-press-main')?.day).toBe(6)
+
+    const completedPress = {
+      ...enabled,
+      sessions: enabled.sessions.map((session) => session.id === '1-press-main' ? { ...session, completedAt: '2026-08-03T08:00:00.000Z' } : session),
+    }
+    const disabled = setFlexibleLiftEnabled(completedPress, 'press', false)
+    expect(disabled.sessions.some((session) => session.id === '1-press-main')).toBe(true)
+    expect(disabled.sessions.some((session) => session.lift === 'press' && !session.completedAt)).toBe(false)
+    expect(setFlexibleLiftEnabled(disabled, 'press', true).sessions.filter((session) => session.lift === 'press')).toHaveLength(config.weeks)
+  })
 })
 
 describe('local data migration', () => {
@@ -88,6 +138,7 @@ describe('local data migration', () => {
 
     expect(normalizeData(legacy).armBandRecords).toEqual([])
     expect(normalizeData(legacy).pushUpRecords).toEqual([])
+    expect(normalizeData(legacy).restSeconds).toMatchObject({ curl: 90, press: 150 })
   })
 
   it('defaults legacy push-up entries to bodyweight', () => {
@@ -100,5 +151,31 @@ describe('local data migration', () => {
     } as unknown as AppData
 
     expect(normalizeData(legacy).pushUpRecords[0]).toMatchObject({ loadType: 'bodyweight', weight: 0 })
+  })
+
+  it('keeps a legacy three-lift plan valid without adding optional sessions', () => {
+    const plan = generatePlan(config)
+    const legacyPlan = {
+      ...plan,
+      config: {
+        ...plan.config,
+        lifts: {
+          squat: plan.config.lifts.squat,
+          bench: plan.config.lifts.bench,
+          deadlift: plan.config.lifts.deadlift,
+        },
+      },
+    } as unknown as AppData['plan']
+    const migrated = normalizeData({
+      version: 1,
+      plan: legacyPlan,
+      restSeconds: { squat: 180, bench: 150, deadlift: 210 },
+      armBandRecords: [],
+      pushUpRecords: [],
+    } as unknown as AppData)
+
+    expect(migrated.plan?.config.lifts.curl.enabled).toBe(false)
+    expect(migrated.plan?.sessions).toHaveLength(plan.sessions.length)
+    expect(migrated.plan?.sessions.every((session) => session.day)).toBe(true)
   })
 })
