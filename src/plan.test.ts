@@ -138,7 +138,22 @@ describe('local data migration', () => {
 
     expect(normalizeData(legacy).armBandRecords).toEqual([])
     expect(normalizeData(legacy).pushUpRecords).toEqual([])
+    expect(normalizeData(legacy).memos).toEqual([])
     expect(normalizeData(legacy).restSeconds).toMatchObject({ curl: 90, press: 150 })
+  })
+
+  it('keeps saved memos when normalizing data', () => {
+    const memo = { id: 'memo-1', title: '训练感受', content: '今天状态不错', createdAt: '2026-08-01T08:00:00.000Z' }
+    const normalized = normalizeData({
+      version: 1,
+      plan: null,
+      restSeconds: { squat: 180, bench: 150, deadlift: 210 },
+      armBandRecords: [],
+      pushUpRecords: [],
+      memos: [memo],
+    } as unknown as AppData)
+
+    expect(normalized.memos).toEqual([memo])
   })
 
   it('defaults legacy push-up entries to bodyweight', () => {

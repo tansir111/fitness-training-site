@@ -60,12 +60,21 @@ export interface PushUpRecord {
   recordedAt: string
 }
 
+export interface MemoRecord {
+  id: string
+  title: string
+  content: string
+  createdAt: string
+  updatedAt?: string
+}
+
 export interface AppData {
   version: 1
   plan: TrainingPlan | null
   restSeconds: Record<LiftId, number>
   armBandRecords: ArmBandRecord[]
   pushUpRecords: PushUpRecord[]
+  memos: MemoRecord[]
 }
 
 export const LIFT_NAMES: Record<LiftId, string> = {

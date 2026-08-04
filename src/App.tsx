@@ -11,6 +11,9 @@ import {
   HandFist,
   House,
   Minus,
+  Microphone,
+  MicrophoneSlash,
+  Notebook,
   Pause,
   PencilSimple,
   Play,
@@ -24,7 +27,7 @@ import {
 } from '@phosphor-icons/react'
 import { applyAdjustment, flexibleLiftIds, generatePlan, getDefaultLiftDays, getFailureAdvice, getLiftDays, liftIds, setFlexibleLiftEnabled, type AdjustmentType } from './plan'
 import { defaultData, loadData, normalizeData, saveData, validateBackup } from './storage'
-import { LIFT_NAMES, type AppData, type ArmBandDifficulty, type ArmBandRecord, type LiftId, type PlanConfig, type PushUpLoadType, type PushUpRecord, type SetResult, type TrainingSession, type Weekday } from './types'
+import { LIFT_NAMES, type AppData, type ArmBandDifficulty, type ArmBandRecord, type LiftId, type MemoRecord, type PlanConfig, type PushUpLoadType, type PushUpRecord, type SetResult, type TrainingSession, type Weekday } from './types'
 import benchIcon from './assets/bench-v3.png'
 import deadliftIcon from './assets/deadlift-v3.png'
 import squatIcon from './assets/squat-v3.png'
@@ -34,8 +37,31 @@ import armBandTabIcon from './assets/armband-tab-icon.png'
 import pushUpTabIcon from './assets/pushup-icon-xiaoxin8.png'
 import navOtherMask from './assets/imagegen2/nav-other-mask.png'
 import navSettingsMask from './assets/imagegen2/nav-settings-mask.png'
+import alarmSoundUrl from './assets/cheerful-notification-simple.mp3'
 
 type View = 'today' | 'plan' | 'progress' | 'other' | 'settings'
+
+type SpeechRecognitionResultEvent = Event & {
+  resultIndex: number
+  results: {
+    length: number
+    [index: number]: { isFinal: boolean; [index: number]: { transcript: string } }
+  }
+}
+
+type SpeechRecognitionErrorEvent = Event & { error?: string }
+type SpeechRecognitionLike = {
+  lang: string
+  continuous: boolean
+  interimResults: boolean
+  start: () => void
+  stop: () => void
+  abort: () => void
+  onresult: ((event: SpeechRecognitionResultEvent) => void) | null
+  onerror: ((event: SpeechRecognitionErrorEvent) => void) | null
+  onend: (() => void) | null
+}
+type SpeechRecognitionConstructor = new () => SpeechRecognitionLike
 
 const AUTHOR_WECHAT = 'ABC2023393253'
 
@@ -120,7 +146,7 @@ function WeekdayPicker({
           type="button"
           key={option.value}
           disabled={disabled}
-          className={days.includes(option.value) ? 'selected' : ''}
+          className={[days.includes(option.value) ? 'selected' : '', days[0] === option.value ? 'heavy-day' : '', days[1] === option.value ? 'light-day' : ''].filter(Boolean).join(' ')}
           onClick={() => selectDay(option.value)}
         >
           周{option.label}
@@ -147,7 +173,7 @@ export function App() {
 
   if (!data.plan) {
     if (view === 'other') {
-      return <OtherView armBandRecords={data.armBandRecords} pushUpRecords={data.pushUpRecords} setData={setData} notify={setToast} standalone onBack={() => setView('today')} />
+      return <OtherView armBandRecords={data.armBandRecords} pushUpRecords={data.pushUpRecords} memos={data.memos} setData={setData} notify={setToast} standalone onBack={() => setView('today')} />
     }
     return <PlanSetup onCreate={(config) => setData((current) => ({ ...current, plan: generatePlan(config) }))} onOpenOther={() => setView('other')} />
   }
@@ -222,7 +248,7 @@ export function App() {
         {view === 'today' && <TodayView plan={plan} onStart={setActiveSessionId} />}
         {view === 'plan' && <PlanView plan={plan} onStart={setActiveSessionId} onScheduleChange={updateLiftSchedule} onEnabledChange={updateLiftEnabled} />}
         {view === 'progress' && <ProgressView plan={plan} />}
-        {view === 'other' && <OtherView armBandRecords={data.armBandRecords} pushUpRecords={data.pushUpRecords} setData={setData} notify={setToast} />}
+        {view === 'other' && <OtherView armBandRecords={data.armBandRecords} pushUpRecords={data.pushUpRecords} memos={data.memos} setData={setData} notify={setToast} />}
         {view === 'settings' && <SettingsView data={data} setData={setData} notify={setToast} />}
       </main>
 
@@ -360,11 +386,12 @@ function formatArmBandDate(value: string) {
   })
 }
 
-type OtherTab = 'armband' | 'pushup'
+type OtherTab = 'armband' | 'pushup' | 'memo'
 
-function OtherView({ armBandRecords, pushUpRecords, setData, notify, standalone = false, onBack }: {
+function OtherView({ armBandRecords, pushUpRecords, memos, setData, notify, standalone = false, onBack }: {
   armBandRecords: ArmBandRecord[]
   pushUpRecords: PushUpRecord[]
+  memos: MemoRecord[]
   setData: React.Dispatch<React.SetStateAction<AppData>>
   notify: (message: string) => void
   standalone?: boolean
@@ -375,15 +402,18 @@ function OtherView({ armBandRecords, pushUpRecords, setData, notify, standalone 
   return (
     <div className={standalone ? 'page other-page standalone-other' : 'page other-page'}>
       {standalone && <header className="other-standalone-header"><Brand /><button className="secondary-button" onClick={onBack}><House />返回计划</button></header>}
-      <PageHeader eyebrow="其它训练" title="其它" detail="记录臂力棒和俯卧撑，数据只保存在当前浏览器，不影响三大项周期计划。" />
-      <div className="other-tabs" role="tablist" aria-label="其它训练类型">
+      <PageHeader eyebrow="其它记录" title="其它" detail="记录臂力棒、俯卧撑和训练备忘，数据只保存在当前浏览器。" />
+      <div className="other-tabs" role="tablist" aria-label="其它记录类型">
         <button type="button" role="tab" aria-selected={tab === 'armband'} className={tab === 'armband' ? 'active' : ''} onClick={() => setTab('armband')}><img className="other-tab-icon" src={armBandTabIcon} alt="" />臂力棒</button>
         <button type="button" role="tab" aria-selected={tab === 'pushup'} className={tab === 'pushup' ? 'active' : ''} onClick={() => setTab('pushup')}><img className="other-tab-icon" src={pushUpTabIcon} alt="" />俯卧撑</button>
+        <button type="button" role="tab" aria-selected={tab === 'memo'} className={tab === 'memo' ? 'active' : ''} onClick={() => setTab('memo')}><Notebook weight="bold" />备忘录</button>
       </div>
-      <OtherTrainingTools />
+      {tab !== 'memo' && <OtherTrainingTools />}
       {tab === 'armband'
         ? <ArmBandView records={armBandRecords} setData={setData} notify={notify} />
-        : <PushUpView records={pushUpRecords} setData={setData} notify={notify} />}
+        : tab === 'pushup'
+          ? <PushUpView records={pushUpRecords} setData={setData} notify={notify} />
+          : <MemoView records={memos} setData={setData} notify={notify} />}
     </div>
   )
 }
@@ -618,6 +648,167 @@ function PushUpView({ records, setData, notify }: {
   )
 }
 
+function MemoView({ records, setData, notify }: {
+  records: MemoRecord[]
+  setData: React.Dispatch<React.SetStateAction<AppData>>
+  notify: (message: string) => void
+}) {
+  const [title, setTitle] = useState('')
+  const [content, setContent] = useState('')
+  const [editingId, setEditingId] = useState<string | null>(null)
+  const [pendingDeleteId, setPendingDeleteId] = useState<string | null>(null)
+  const [isListening, setIsListening] = useState(false)
+  const recognitionRef = useRef<SpeechRecognitionLike | null>(null)
+  const contentBeforeSpeechRef = useRef('')
+  const finalSpeechRef = useRef('')
+  const orderedMemos = [...records].sort((a, b) => new Date(b.updatedAt ?? b.createdAt).getTime() - new Date(a.updatedAt ?? a.createdAt).getTime())
+
+  const getSpeechRecognition = (): SpeechRecognitionConstructor | null => {
+    const speechWindow = window as Window & { SpeechRecognition?: SpeechRecognitionConstructor; webkitSpeechRecognition?: SpeechRecognitionConstructor }
+    return speechWindow.SpeechRecognition ?? speechWindow.webkitSpeechRecognition ?? null
+  }
+
+  const toggleVoiceInput = () => {
+    if (isListening) {
+      recognitionRef.current?.stop()
+      return
+    }
+    const Recognition = getSpeechRecognition()
+    if (!Recognition) {
+      notify('当前浏览器不支持语音输入，请使用最新版 Chrome 或 Edge')
+      return
+    }
+    const recognition = new Recognition()
+    recognition.lang = 'zh-CN'
+    recognition.continuous = true
+    recognition.interimResults = true
+    contentBeforeSpeechRef.current = content ? `${content.trim()} ` : ''
+    finalSpeechRef.current = ''
+    recognition.onresult = (event) => {
+      let interimTranscript = ''
+      const resultIndex = Number.isFinite(event.resultIndex) ? event.resultIndex : 0
+      for (let index = resultIndex; index < event.results.length; index += 1) {
+        const result = event.results[index]
+        const transcript = result[0]?.transcript ?? ''
+        if (result.isFinal) finalSpeechRef.current += transcript
+        else interimTranscript += transcript
+      }
+      setContent(`${contentBeforeSpeechRef.current}${finalSpeechRef.current}${interimTranscript}`.trimStart())
+    }
+    recognition.onerror = (event) => {
+      setIsListening(false)
+      recognitionRef.current = null
+      if (event.error === 'not-allowed' || event.error === 'service-not-allowed') notify('麦克风权限被拒绝，请在浏览器设置中允许麦克风')
+      else if (event.error !== 'aborted') notify('语音识别暂时不可用，请重试')
+    }
+    recognition.onend = () => {
+      setIsListening(false)
+      recognitionRef.current = null
+    }
+    recognitionRef.current = recognition
+    try {
+      recognition.start()
+      setIsListening(true)
+    } catch {
+      recognitionRef.current = null
+      notify('无法启动语音输入，请重试')
+    }
+  }
+
+  useEffect(() => () => {
+    recognitionRef.current?.abort()
+    recognitionRef.current = null
+    finalSpeechRef.current = ''
+  }, [])
+
+  const resetForm = () => {
+    recognitionRef.current?.stop()
+    setTitle('')
+    setContent('')
+    setEditingId(null)
+    setIsListening(false)
+    finalSpeechRef.current = ''
+  }
+
+  const saveMemo = () => {
+    const trimmedTitle = title.trim()
+    const trimmedContent = content.trim()
+    if (!trimmedContent) {
+      notify('请先写下备忘内容')
+      return
+    }
+    const now = new Date().toISOString()
+    const existing = editingId ? records.find((memo) => memo.id === editingId) : undefined
+    const nextMemo: MemoRecord = {
+      id: editingId ?? `memo-${Date.now()}`,
+      title: trimmedTitle,
+      content: trimmedContent,
+      createdAt: existing?.createdAt ?? now,
+      ...(editingId ? { updatedAt: now } : {}),
+    }
+    setData((current) => ({
+      ...current,
+      memos: editingId
+        ? current.memos.map((memo) => memo.id === editingId ? nextMemo : memo)
+        : [nextMemo, ...current.memos],
+    }))
+    notify(editingId ? '备忘已更新' : '备忘已保存')
+    resetForm()
+  }
+
+  const editMemo = (memo: MemoRecord) => {
+    setPendingDeleteId(null)
+    setTitle(memo.title)
+    setContent(memo.content)
+    setEditingId(memo.id)
+    window.scrollTo({ top: 0, behavior: 'smooth' })
+  }
+
+  const requestDeleteMemo = (id: string) => {
+    setPendingDeleteId(id)
+  }
+
+  const cancelDeleteMemo = () => {
+    setPendingDeleteId(null)
+  }
+
+  const confirmDeleteMemo = () => {
+    if (!pendingDeleteId) return
+    const id = pendingDeleteId
+    setData((current) => ({ ...current, memos: current.memos.filter((memo) => memo.id !== id) }))
+    if (editingId === id) resetForm()
+    setPendingDeleteId(null)
+    notify('备忘已删除')
+  }
+
+  return (
+    <div className="memo-layout">
+      <section className="memo-form-panel">
+        <div className="section-heading"><h2>{editingId ? '编辑备忘' : '新建备忘'}</h2><span>记录训练之外的想法</span></div>
+        <div className="memo-form">
+          <label className="memo-field"><span>标题（可选）</span><input type="text" maxLength={80} value={title} onChange={(event) => setTitle(event.target.value)} placeholder="例如：本周训练感受" /></label>
+          <label className="memo-field"><span>内容</span><div className="memo-content-control"><textarea rows={7} maxLength={2000} value={content} onChange={(event) => setContent(event.target.value)} placeholder="记录动作要点、身体状态或下次计划……" /><button type="button" className={isListening ? 'memo-voice-button listening' : 'memo-voice-button'} onClick={toggleVoiceInput} aria-label={isListening ? '停止语音输入' : '开始语音输入'} title={isListening ? '停止语音输入' : '语音输入'}>{isListening ? <MicrophoneSlash weight="bold" /> : <Microphone weight="bold" />}</button></div>{isListening && <small className="memo-listening-hint">正在听，请直接说话；再次点击麦克风即可停止</small>}</label>
+          <div className="memo-form-actions">
+            {editingId && <button type="button" className="secondary-button" onClick={resetForm}>取消编辑</button>}
+            <button type="button" className="primary-button" onClick={saveMemo}><Check weight="bold" />{editingId ? '保存修改' : '保存备忘'}</button>
+          </div>
+        </div>
+      </section>
+
+      <section className="memo-list-section">
+        <div className="section-heading"><h2>我的备忘</h2><span>{orderedMemos.length} 条</span></div>
+        {orderedMemos.length ? <div className="memo-list">{orderedMemos.map((memo) => (
+          <article className="memo-record" key={memo.id}>
+            <div className="memo-record-header"><div><strong>{memo.title || '未命名备忘'}</strong><time>{formatArmBandDate(memo.updatedAt ?? memo.createdAt)}</time></div><div className="memo-record-actions"><button type="button" title="编辑备忘" aria-label="编辑备忘" onClick={() => editMemo(memo)}><PencilSimple /></button><button type="button" title="删除备忘" aria-label="删除备忘" onClick={() => requestDeleteMemo(memo.id)}><Trash /></button></div></div>
+            <p>{memo.content}</p>
+            {pendingDeleteId === memo.id && <div className="memo-delete-confirm" role="alert"><span>确定删除这条备忘吗？</span><div className="memo-delete-confirm-actions"><button type="button" className="memo-delete-cancel" onClick={cancelDeleteMemo}>取消</button><button type="button" className="memo-delete-accept" onClick={confirmDeleteMemo}>确认删除</button></div></div>}
+          </article>
+        ))}</div> : <div className="memo-empty armband-empty"><Notebook size={30} /><strong>还没有备忘</strong><span>把训练感受、动作要点和下一步计划记在这里。</span></div>}
+      </section>
+    </div>
+  )
+}
+
 function PageHeader({ eyebrow, title, detail }: { eyebrow: string; title: string; detail: string }) {
   return <header className="page-header"><span>{eyebrow}</span><h1>{title}</h1><p>{detail}</p></header>
 }
@@ -740,7 +931,12 @@ function RestTimer({ initialSeconds, onDefaultChange }: { initialSeconds: number
   const [remaining, setRemaining] = useState(initialSeconds)
   const [endAt, setEndAt] = useState<number | null>(null)
   const [running, setRunning] = useState(false)
+  const [alarmActive, setAlarmActive] = useState(false)
   const notifiedRef = useRef(false)
+  const alarmAudioRef = useRef<HTMLAudioElement | null>(null)
+  const vibrationTimerRef = useRef<number | null>(null)
+  const alarmResetTimerRef = useRef<number | null>(null)
+  const alarmGenerationRef = useRef(0)
 
   useEffect(() => {
     if (!running || !endAt) return
@@ -757,8 +953,78 @@ function RestTimer({ initialSeconds, onDefaultChange }: { initialSeconds: number
   useEffect(() => {
     if (remaining !== 0 || notifiedRef.current) return
     notifiedRef.current = true
+    startAlarm()
     notifyTimerEnd()
   }, [remaining])
+
+  const prepareAudio = () => {
+    const audio = alarmAudioRef.current
+    if (!audio) return
+    audio.load()
+    audio.muted = true
+    void audio.play().then(() => {
+      audio.pause()
+      audio.currentTime = 0
+      audio.muted = false
+    }).catch(() => {
+      audio.muted = false
+    })
+  }
+
+  const stopAlarm = () => {
+    alarmGenerationRef.current += 1
+    const audio = alarmAudioRef.current
+    if (audio) {
+      audio.pause()
+      audio.currentTime = 0
+    }
+    if (alarmResetTimerRef.current !== null) {
+      window.clearTimeout(alarmResetTimerRef.current)
+      alarmResetTimerRef.current = null
+    }
+    if (vibrationTimerRef.current !== null) {
+      window.clearInterval(vibrationTimerRef.current)
+      vibrationTimerRef.current = null
+    }
+    try {
+      if ('vibrate' in navigator) navigator.vibrate(0)
+    } catch { /* Vibration is unavailable on many desktop browsers. */ }
+    setAlarmActive(false)
+  }
+
+  const startAlarm = () => {
+    stopAlarm()
+    const generation = alarmGenerationRef.current
+    setAlarmActive(true)
+    const vibrate = () => {
+      try {
+        if ('vibrate' in navigator) navigator.vibrate([300, 120, 300, 120, 600])
+      } catch { /* Vibration is unavailable on many desktop browsers. */ }
+    }
+    vibrate()
+    vibrationTimerRef.current = window.setInterval(vibrate, 1800)
+    alarmResetTimerRef.current = window.setTimeout(() => {
+      stopAlarm()
+      setRunning(false)
+      setEndAt(null)
+      setRemaining(duration)
+      notifiedRef.current = false
+    }, 3 * 60 * 1000)
+
+    const audio = alarmAudioRef.current
+    if (!audio) return
+    audio.currentTime = 0
+    void audio.play().catch(() => {
+      if (generation === alarmGenerationRef.current) stopAlarm()
+    })
+  }
+
+  useEffect(() => () => {
+    alarmGenerationRef.current += 1
+    alarmAudioRef.current?.pause()
+    if (alarmResetTimerRef.current !== null) window.clearTimeout(alarmResetTimerRef.current)
+    if (vibrationTimerRef.current !== null) window.clearInterval(vibrationTimerRef.current)
+  }, [])
 
   const adjust = (amount: number) => {
     const next = Math.min(600, Math.max(30, duration + amount))
@@ -771,6 +1037,7 @@ function RestTimer({ initialSeconds, onDefaultChange }: { initialSeconds: number
       setRunning(false)
       setEndAt(null)
     } else {
+      prepareAudio()
       notifiedRef.current = false
       const seconds = remaining === 0 ? duration : remaining
       setRemaining(seconds)
@@ -779,25 +1046,25 @@ function RestTimer({ initialSeconds, onDefaultChange }: { initialSeconds: number
       if ('Notification' in window && Notification.permission === 'default') void Notification.requestPermission()
     }
   }
-  const reset = () => { setRunning(false); setEndAt(null); setRemaining(duration); notifiedRef.current = false }
+  const reset = () => { stopAlarm(); setRunning(false); setEndAt(null); setRemaining(duration); notifiedRef.current = false }
   const format = `${Math.floor(remaining / 60).toString().padStart(2, '0')}:${(remaining % 60).toString().padStart(2, '0')}`
 
-  return <section className="timer-panel"><div className="timer-heading"><span><TimerIcon weight="bold" />组间休息</span><button onClick={reset}><Repeat />重置</button></div><div className="timer-main"><button className="timer-adjust" onClick={() => adjust(-30)} aria-label="减少30秒"><Minus /></button><button className={running ? 'timer-display running' : 'timer-display'} onClick={startPause} aria-label={running ? '暂停计时' : '开始计时'}><strong>{format}</strong><span>{running ? <><Pause weight="fill" />暂停</> : <><Play weight="fill" />开始计时</>}</span></button><button className="timer-adjust" onClick={() => adjust(30)} aria-label="增加30秒"><Plus /></button></div></section>
+  return (
+    <section className="timer-panel">
+      <audio ref={alarmAudioRef} src={alarmSoundUrl} preload="auto" loop hidden aria-hidden="true" />
+      <div className="timer-heading"><span><TimerIcon weight="bold" />组间休息</span><button onClick={reset}><Repeat />重置</button></div>
+      <div className="timer-main"><button className="timer-adjust" onClick={() => adjust(-30)} aria-label="减少30秒"><Minus /></button><button className={running ? 'timer-display running' : 'timer-display'} onClick={startPause} aria-label={running ? '暂停计时' : '开始计时'}><strong>{format}</strong><span>{running ? <><Pause weight="fill" />暂停</> : <><Play weight="fill" />开始计时</>}</span></button><button className="timer-adjust" onClick={() => adjust(30)} aria-label="增加30秒"><Plus /></button></div>
+      {alarmActive && <div className="timer-alarm" role="alert"><strong>休息结束</strong><button type="button" onClick={stopAlarm}><X />关闭铃声</button></div>}
+    </section>
+  )
 }
 
 function notifyTimerEnd() {
-  if ('vibrate' in navigator) navigator.vibrate([200, 100, 200])
   try {
-    const context = new AudioContext()
-    const oscillator = context.createOscillator()
-    const gain = context.createGain()
-    oscillator.frequency.value = 740
-    gain.gain.setValueAtTime(0.12, context.currentTime)
-    oscillator.connect(gain).connect(context.destination)
-    oscillator.start()
-    oscillator.stop(context.currentTime + 0.35)
-  } catch { /* Browser may require a fresh user gesture. */ }
-  if ('Notification' in window && Notification.permission === 'granted') new Notification('休息结束', { body: '可以开始下一组了。' })
+    if ('Notification' in window && Notification.permission === 'granted') {
+      new Notification('休息结束', { body: '可以开始下一组了。' })
+    }
+  } catch { /* Notifications can be blocked by the browser or device. */ }
 }
 
 function AdjustmentSheet({ session, onChoose, onSkip }: { session: TrainingSession; onChoose: (type: AdjustmentType) => void; onSkip: () => void }) {
